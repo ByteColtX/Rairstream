@@ -1,0 +1,15 @@
+[package]
+name = "rairstream-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rairstream-config = { path = "../../crates/rairstream-config" }
+rairstream-core = { path = "../../crates/rairstream-core" }
+rairstream-device-discovery = { path = "../../crates/rairstream-device-discovery" }
+rairstream-session = { path = "../../crates/rairstream-session" }
+tracing.workspace = true

@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Cargo fmt
+        run: cargo fmt --check
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Cargo test
+        run: cargo test --workspace
