@@ -1,13 +1,18 @@
 //! 设备发现层：负责抽象 `AirPlay` / `RAOP` 设备浏览结果。
 
+mod mdns;
+mod parser;
+
 use crate::app::{AirPlayGeneration, SpeakerDevice};
+
+pub use mdns::MdnsDiscoveryService;
 
 /// 发现服务的最小接口。
 pub trait DiscoveryService {
     fn discover_devices(&self) -> Vec<SpeakerDevice>;
 }
 
-/// 当前阶段的内存实现，后续替换为 mDNS/Bonjour 浏览器。
+/// 当前阶段的内存实现，可用于无网络环境下的稳定测试。
 #[derive(Debug, Default)]
 pub struct StubDiscoveryService;
 
