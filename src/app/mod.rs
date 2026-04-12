@@ -3,6 +3,7 @@
 pub mod platform;
 mod session;
 
+use crate::audio::AudioCaptureError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -64,6 +65,8 @@ pub enum RairstreamError {
     NotImplemented { feature: &'static str },
     #[error("配置错误: {message}")]
     InvalidConfiguration { message: String },
+    #[error(transparent)]
+    AudioCapture(#[from] AudioCaptureError),
 }
 
 #[cfg(test)]

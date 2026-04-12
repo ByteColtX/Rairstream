@@ -9,9 +9,13 @@ rust-version = "1.85"
 
 [dependencies]
 anyhow = "1.0.100"
+mdns-sd = "0.19.0"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.17"
 tracing = "0.1.41"
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.23.0"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

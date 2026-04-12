@@ -26,7 +26,7 @@ where
     pub fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
         ensure_supported_runtime()?;
 
-        let _format = WindowsLoopbackCapture::preferred_format();
+        let _format = WindowsLoopbackCapture::preferred_format()?;
         let descriptor = SessionDescriptor {
             device: device.clone(),
         };
