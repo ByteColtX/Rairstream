@@ -286,6 +286,83 @@ impl WindowsLoopbackCapture {
     }
 }
 
+#[doc(hidden)]
+pub mod testing {
+    use std::collections::VecDeque;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use super::{
+        AudioCaptureError, AudioChunk, AudioSink, CaptureConfig, CaptureDriver, RunningCapture,
+        spawn_capture_worker,
+    };
+
+    #[derive(Debug, Clone, Default)]
+    pub struct StopCallCounter(Arc<AtomicUsize>);
+
+    impl StopCallCounter {
+        #[must_use]
+        pub fn count(&self) -> usize {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    pub fn spawn_scripted_capture_worker<S>(
+        sink: S,
+        config: CaptureConfig,
+        responses: Vec<Result<Option<AudioChunk>, AudioCaptureError>>,
+        stop_calls: StopCallCounter,
+    ) -> Result<RunningCapture, AudioCaptureError>
+    where
+        S: AudioSink,
+    {
+        spawn_capture_worker(
+            sink,
+            config,
+            move || Ok(ScriptedDriver::new(responses, stop_calls)),
+            "test-scripted-capture-worker",
+        )
+    }
+
+    #[derive(Debug)]
+    struct ScriptedDriver {
+        responses: VecDeque<Result<Option<AudioChunk>, AudioCaptureError>>,
+        stop_calls: StopCallCounter,
+    }
+
+    impl ScriptedDriver {
+        fn new(
+            responses: Vec<Result<Option<AudioChunk>, AudioCaptureError>>,
+            stop_calls: StopCallCounter,
+        ) -> Self {
+            Self {
+                responses: responses.into(),
+                stop_calls,
+            }
+        }
+    }
+
+    impl CaptureDriver for ScriptedDriver {
+        fn start(&mut self) -> Result<(), AudioCaptureError> {
+            Ok(())
+        }
+
+        fn next_chunk(
+            &mut self,
+            _timeout_ms: u32,
+        ) -> Result<Option<AudioChunk>, AudioCaptureError> {
+            self.responses.pop_front().unwrap_or(Ok(None))
+        }
+
+        fn stop(&mut self) -> Result<(), AudioCaptureError> {
+            self.stop_calls.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

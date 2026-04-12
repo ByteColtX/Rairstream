@@ -7,6 +7,49 @@ use crate::app::{AirPlayGeneration, SpeakerDevice};
 
 pub use mdns::MdnsDiscoveryService;
 
+#[doc(hidden)]
+pub mod testing {
+    use std::net::Ipv4Addr;
+
+    use crate::app::SpeakerDevice;
+
+    use super::parser::{MdnsServiceKind, ResolvedMdnsService, parse_resolved_services};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MdnsTestServiceKind {
+        Raop,
+        AirPlay,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct MdnsTestResolvedService {
+        pub service_kind: MdnsTestServiceKind,
+        pub fullname: String,
+        pub port: u16,
+        pub ipv4_addresses: Vec<Ipv4Addr>,
+        pub device_id: Option<String>,
+    }
+
+    #[must_use]
+    pub fn parse_test_services(services: Vec<MdnsTestResolvedService>) -> Vec<SpeakerDevice> {
+        parse_resolved_services(
+            services
+                .into_iter()
+                .map(|service| ResolvedMdnsService {
+                    service_kind: match service.service_kind {
+                        MdnsTestServiceKind::Raop => MdnsServiceKind::Raop,
+                        MdnsTestServiceKind::AirPlay => MdnsServiceKind::AirPlay,
+                    },
+                    fullname: service.fullname,
+                    port: service.port,
+                    ipv4_addresses: service.ipv4_addresses,
+                    device_id: service.device_id,
+                })
+                .collect(),
+        )
+    }
+}
+
 /// 发现服务的最小接口。
 pub trait DiscoveryService {
     fn discover_devices(&self) -> Vec<SpeakerDevice>;
