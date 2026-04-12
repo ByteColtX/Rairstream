@@ -1,6 +1,6 @@
-//! 设备发现层：负责抽象 AirPlay / RAOP 设备浏览结果。
+//! 设备发现层：负责抽象 `AirPlay` / `RAOP` 设备浏览结果。
 
-use rairstream_core::{AirPlayGeneration, SpeakerDevice};
+use crate::app::{AirPlayGeneration, SpeakerDevice};
 
 /// 发现服务的最小接口。
 pub trait DiscoveryService {

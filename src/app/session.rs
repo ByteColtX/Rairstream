@@ -1,16 +1,14 @@
 //! 会话编排层：连接配置、发现、采集与传输。
 
-use rairstream_airplay::{RaopSession, SessionDescriptor};
-use rairstream_audio_capture::WindowsLoopbackCapture;
-use rairstream_core::{AppState, RairstreamError, SessionBackend, SessionState, SpeakerDevice};
-use rairstream_device_discovery::DiscoveryService;
-use rairstream_platform::ensure_supported_runtime;
+use super::platform::ensure_supported_runtime;
+use super::{AppState, RairstreamError, SessionState, SpeakerDevice};
+use crate::audio::WindowsLoopbackCapture;
+use crate::discovery::DiscoveryService;
+use crate::transport::{RaopSession, SessionDescriptor};
 
 /// 首版本会话协调器。
 pub struct SessionCoordinator<D> {
     discovery: D,
-    capture: WindowsLoopbackCapture,
-    transport: RaopSession,
 }
 
 impl<D> SessionCoordinator<D>
@@ -18,11 +16,7 @@ where
     D: DiscoveryService,
 {
     pub fn new(discovery: D) -> Self {
-        Self {
-            discovery,
-            capture: WindowsLoopbackCapture,
-            transport: RaopSession,
-        }
+        Self { discovery }
     }
 
     pub fn discover(&self) -> Vec<SpeakerDevice> {
@@ -32,11 +26,11 @@ where
     pub fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
         ensure_supported_runtime()?;
 
-        let _format = self.capture.preferred_format();
+        let _format = WindowsLoopbackCapture::preferred_format();
         let descriptor = SessionDescriptor {
             device: device.clone(),
         };
-        let _transport = self.transport.transport_name();
+        let _transport = RaopSession::transport_name();
         let _ = descriptor;
 
         Ok(AppState {
@@ -51,8 +45,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::SessionCoordinator;
-    use rairstream_core::SessionState;
-    use rairstream_device_discovery::StubDiscoveryService;
+    use crate::app::SessionState;
+    use crate::discovery::StubDiscoveryService;
 
     #[test]
     fn coordinator_exposes_discovered_devices() {

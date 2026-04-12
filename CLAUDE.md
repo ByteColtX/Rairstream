@@ -1,91 +1,72 @@
-# Rairstream
+# CLAUDE.md
 
-## 项目目标
-- 本项目是对 TuneBlade 的 Rust 重写，项目名为 **Rairstream**。
-- 首版本聚焦 **Windows-first**。
-- 首版本只做一件核心事情：将系统音频流式传输到 **AirPlay enabled speakers**。
-- 其他能力要预留扩展点，但首版本不实现。
+## 项目概述（WHAT）
 
-## 首版本范围
-### 要实现
-- Windows 桌面端应用骨架
-- AirPlay / RAOP 设备发现
-- 单设备选择与连接 / 断开
-- Windows 系统音频采集（WASAPI loopback）
-- 基础音频管线
-- RAOP / AirPlay 传输骨架
+将 Windows 系统音频实时流式传输到 AirPlay 设备的桌面端应用。
 
-### 明确不在首版本实现
-- AirPlay 2
-- 多房间 / 多设备同步
-- 手动管理接收端
-- 延迟调节 UI
-- 高级预设
-- 非 speaker 目标
-- macOS 系统音频采集
+**当前目录骨架：**
+- `src/main.rs` — 应用入口与启动装配
+- `src/app/` — 应用状态、会话编排、平台检查
+- `src/audio/` — Windows 音频采集（WASAPI loopback）
+- `src/discovery/` — AirPlay 设备发现（mDNS/Bonjour）
+- `src/transport/` — AirPlay/RAOP 传输协议骨架
+- `src/ui/` — 系统托盘 UI（设备选择、连接控制）
+- `src/config/` — 用户配置模型与持久化入口预留
 
-## 工程约束
-- 仓库结构采用工程化 Rust workspace 组织。
-- 代码风格遵循 Rust 官方风格。
-- 格式化工具统一使用 `rustfmt`。
-- Lint 使用 `clippy`，新代码应保持 warning-free。
-- 注释使用中文。
-- 对外公开 API 文档保持 idiomatic rustdoc 结构；如果未来需要对外发布，再考虑双语或英文文档。
+**当前仓库为单 crate Rust 应用，不再使用 `apps/` / `crates/` workspace 布局。**
 
-## 当前推荐目录结构
-```text
-apps/
-  rairstream-desktop/
-crates/
-  rairstream-core/
-  rairstream-device-discovery/
-  rairstream-airplay/
-  rairstream-audio-capture/
-  rairstream-session/
-  rairstream-config/
-  rairstream-platform/
-tests/
-  integration/
-  fixtures/
-```
+**主要依赖：**
+- `windows` crate — WASAPI 音频 API
+- `mdns-sd` 或 `zeroconf` — 设备发现
+- `tao` / `tray-icon` — 系统托盘
+- `tokio` — 异步运行时
 
-## 分层原则
-- `apps/rairstream-desktop` 保持薄，主要负责入口、生命周期、依赖装配。
-- `rairstream-core` 放领域模型、共享错误、traits、状态契约。
-- 协议、领域逻辑尽量保持纯 Rust，不依赖 UI 或操作系统。
-- 平台相关代码通过 traits 和 `cfg` 隔离。
-- 只有边界稳定、适合独立测试的部分才拆 crate；紧耦合的应用层代码可保留为模块。
+## 项目目的（WHY）
 
-## 预留扩展点
-- `CaptureBackend`：为未来 macOS 等平台音频采集预留。
-- `SessionBackend`：为未来 AirPlay 2 或 FFI 实现预留。
-- Receiver capability / profile：为设备差异兼容预留。
-- `LatencyPolicy`：为未来延迟控制预留。
-- 配置与 preset 存储面向后续扩展设计，但首版本只保留最小实现。
+让 Windows 用户无需第三方软件，直接将系统音频输出到 AirPlay 设备（Apple TV、HomePod、AirPlay 扬声器等）。
 
-## 质量门禁
-在提交前应尽量通过：
+## 开发约定（HOW）
+
+### 构建与验证
 
 ```bash
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo build                  # 编译
+cargo test                   # 运行所有测试
+cargo clippy -- -D warnings  # Lint（视警告为错误）
+cargo fmt --check            # 格式检查
 ```
 
-## 测试策略
-- 单元测试尽量内联在各 crate 中。
-- 协议与状态机的集成测试放在 `tests/integration/`。
-- 协议 / 设备样例放在 `tests/fixtures/`。
-- Windows 特定行为测试使用 `target_os = "windows"` 做条件保护。
-- 首版本优先覆盖协议、会话、管线，不优先做重 UI 的端到端测试。
+**每次修改后必须确保 `cargo clippy` 和 `cargo fmt --check` 全部通过，不留警告。**
 
-## 开发偏好
-- Git commit message 严格遵循 Conventional Commits 1.0.0。
-- `type` / `scope` / `BREAKING CHANGE` 使用英文。
-- `subject` / `body` / `footer` 使用中文。
-- 优先输出单行 commit message，除非确实需要额外上下文。
+### 代码风格
 
-## 迁移说明
-- 本文件应随仓库一起带到新的开发机器。
-- 计划文件是阶段性产物，不必强依赖迁移；这里已经沉淀了长期有效的约束与方向。
-- 若未来架构方向发生变化，优先更新本文件，而不是依赖外部计划文件。
+- 格式化工具：`rustfmt`（遵循默认配置，不自定义）
+- Lint：`clippy`，所有 warning 均需修复，不使用 `#[allow(...)]` 绕过
+- 注释：**全部使用中文**，包括 `///` 文档注释和 `//` 行内注释
+- 错误处理：使用 `thiserror` 定义领域错误类型，禁止在库代码中使用 `unwrap()`/`expect()`（测试和 `main` 除外）
+
+### 测试约定
+
+- **单元测试**：在同文件底部用 `#[cfg(test)] mod tests { ... }` 包裹，测试纯逻辑（数据转换、状态机、协议编解码等）
+- **集成测试**：放在 `tests/` 目录，测试跨模块行为
+- **异步测试**：使用 `#[tokio::test]`
+- **硬件相关**（WASAPI、网络 IO）：用 trait 抽象后 mock，不依赖真实设备；可用 `mockall` crate
+- **测试命名**：`test_<被测函数>_<场景描述>`，例如 `test_parse_mdns_record_missing_port`
+- 覆盖重点：协议编解码、设备状态流转、音频缓冲区边界条件
+
+### Commit 规范
+
+遵循 [Conventional Commits v1.0.0](https://github.com/conventional-commits/conventionalcommits.org/blob/master/content/v1.0.0/index.md)。
+
+常用类型：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
+
+```
+feat(discovery): 实现 mDNS AirPlay 设备扫描
+fix(audio): 修复 WASAPI loopback 采集时的缓冲区溢出
+test(transport): 补充 RAOP 握手报文编码单测
+```
+
+### 安全注意事项
+
+- 涉及 Windows API 的代码用 `unsafe` 块最小化包裹，并在上方注释说明安全性前提
+- 不得将设备 IP、认证 token 等写死在代码中

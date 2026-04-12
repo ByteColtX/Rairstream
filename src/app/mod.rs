@@ -1,12 +1,17 @@
-//! Rairstream 核心领域模型与共享契约。
+//! 应用层：维护共享领域模型与会话编排入口。
+
+pub mod platform;
+mod session;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use session::SessionCoordinator;
+
 /// 当前应用支持的目标流协议版本。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AirPlayGeneration {
-    /// 首版本仅计划支持 AirPlay 1 / RAOP 兼容设备。
+    /// 首版本仅计划支持 `AirPlay` 1 / `RAOP` 兼容设备。
     AirPlay1,
 }
 
@@ -59,16 +64,6 @@ pub enum RairstreamError {
     NotImplemented { feature: &'static str },
     #[error("配置错误: {message}")]
     InvalidConfiguration { message: String },
-}
-
-/// 为后续多平台音频采集预留的抽象。
-pub trait CaptureBackend {
-    fn backend_name(&self) -> &'static str;
-}
-
-/// 为后续不同 AirPlay 会话实现预留的抽象。
-pub trait SessionBackend {
-    fn transport_name(&self) -> &'static str;
 }
 
 #[cfg(test)]

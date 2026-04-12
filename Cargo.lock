@@ -39,81 +39,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "rairstream-airplay"
-version = "0.1.0"
-dependencies = [
- "rairstream-core",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "rairstream-audio-capture"
-version = "0.1.0"
-dependencies = [
- "rairstream-core",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "rairstream-config"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "rairstream-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "rairstream-desktop"
+name = "rairstream"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "rairstream-config",
- "rairstream-core",
- "rairstream-device-discovery",
- "rairstream-session",
- "tracing",
-]
-
-[[package]]
-name = "rairstream-device-discovery"
-version = "0.1.0"
-dependencies = [
- "rairstream-core",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "rairstream-platform"
-version = "0.1.0"
-dependencies = [
- "rairstream-core",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "rairstream-session"
-version = "0.1.0"
-dependencies = [
- "rairstream-airplay",
- "rairstream-audio-capture",
- "rairstream-core",
- "rairstream-device-discovery",
- "rairstream-platform",
  "serde",
  "thiserror",
  "tracing",

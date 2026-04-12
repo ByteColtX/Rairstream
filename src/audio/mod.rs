@@ -1,6 +1,6 @@
 //! 音频采集层：对上层暴露统一的输入抽象。
 
-use rairstream_core::{CaptureBackend, RairstreamError};
+use crate::app::RairstreamError;
 
 /// 音频流基础格式信息。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,18 +24,18 @@ impl Default for AudioFormat {
 #[derive(Debug, Default)]
 pub struct WindowsLoopbackCapture;
 
-impl CaptureBackend for WindowsLoopbackCapture {
-    fn backend_name(&self) -> &'static str {
+impl WindowsLoopbackCapture {
+    #[must_use]
+    pub fn backend_name() -> &'static str {
         "windows-wasapi-loopback"
     }
-}
 
-impl WindowsLoopbackCapture {
-    pub fn preferred_format(&self) -> AudioFormat {
+    #[must_use]
+    pub fn preferred_format() -> AudioFormat {
         AudioFormat::default()
     }
 
-    pub fn start(&self) -> Result<(), RairstreamError> {
+    pub fn start() -> Result<(), RairstreamError> {
         Err(RairstreamError::NotImplemented {
             feature: "WASAPI loopback capture",
         })
@@ -45,7 +45,6 @@ impl WindowsLoopbackCapture {
 #[cfg(test)]
 mod tests {
     use super::{AudioFormat, WindowsLoopbackCapture};
-    use rairstream_core::CaptureBackend;
 
     #[test]
     fn default_audio_format_matches_cd_quality() {
@@ -54,8 +53,9 @@ mod tests {
 
     #[test]
     fn windows_backend_reports_name() {
-        let backend = WindowsLoopbackCapture;
-
-        assert_eq!(backend.backend_name(), "windows-wasapi-loopback");
+        assert_eq!(
+            WindowsLoopbackCapture::backend_name(),
+            "windows-wasapi-loopback"
+        );
     }
 }

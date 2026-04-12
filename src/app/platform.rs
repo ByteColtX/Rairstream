@@ -1,6 +1,6 @@
 //! 平台层：封装操作系统相关能力。
 
-use rairstream_core::RairstreamError;
+use super::RairstreamError;
 
 /// 平台运行时摘要。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,7 @@ pub struct PlatformInfo {
 }
 
 /// 当前目标平台的最小能力描述。
+#[must_use]
 pub fn current_platform() -> PlatformInfo {
     PlatformInfo {
         os: std::env::consts::OS,

@@ -1,6 +1,6 @@
-//! AirPlay / RAOP 会话与传输边界。
+//! `AirPlay` / `RAOP` 会话与传输边界。
 
-use rairstream_core::{RairstreamError, SessionBackend, SpeakerDevice};
+use crate::app::{RairstreamError, SpeakerDevice};
 use thiserror::Error;
 
 /// 流建立前需要的最小会话信息。
@@ -9,7 +9,7 @@ pub struct SessionDescriptor {
     pub device: SpeakerDevice,
 }
 
-/// AirPlay 传输层错误。
+/// `AirPlay` 传输层错误。
 #[derive(Debug, Error)]
 pub enum AirPlayError {
     #[error("会话尚未接入真实 RAOP 实现")]
@@ -20,14 +20,13 @@ pub enum AirPlayError {
 #[derive(Debug, Default)]
 pub struct RaopSession;
 
-impl SessionBackend for RaopSession {
-    fn transport_name(&self) -> &'static str {
+impl RaopSession {
+    #[must_use]
+    pub fn transport_name() -> &'static str {
         "raop"
     }
-}
 
-impl RaopSession {
-    pub fn connect(&self, _descriptor: &SessionDescriptor) -> Result<(), RairstreamError> {
+    pub fn connect(_descriptor: &SessionDescriptor) -> Result<(), RairstreamError> {
         Err(RairstreamError::NotImplemented {
             feature: "RAOP session connect",
         })
@@ -37,12 +36,9 @@ impl RaopSession {
 #[cfg(test)]
 mod tests {
     use super::RaopSession;
-    use rairstream_core::SessionBackend;
 
     #[test]
     fn raop_session_reports_transport_name() {
-        let session = RaopSession;
-
-        assert_eq!(session.transport_name(), "raop");
+        assert_eq!(RaopSession::transport_name(), "raop");
     }
 }
