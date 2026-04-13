@@ -35,7 +35,7 @@ fn test_refresh_preserves_preferred_device_when_device_still_exists() {
 }
 
 #[test]
-fn test_select_device_transitions_or_returns_platform_error() {
+fn test_select_device_transitions_or_returns_runtime_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, None);
 
@@ -45,17 +45,17 @@ fn test_select_device_transitions_or_returns_platform_error() {
     #[cfg(target_os = "windows")]
     match result {
         Ok(model) => {
-            assert_eq!(model.status_label, "Rairstream：正在连接 Stub Speaker");
+            assert_eq!(model.status_label, "Rairstream：正在串流 Stub Speaker");
             assert_eq!(
                 controller.state().app_state.selected_device_id.as_deref(),
                 Some("stub-speaker")
             );
             assert!(matches!(
                 controller.state().app_state.active_session,
-                SessionState::Connecting { .. }
+                SessionState::Streaming { .. }
             ));
         }
-        Err(RairstreamError::AudioCapture(_)) => {
+        Err(RairstreamError::AudioCapture(_)) | Err(RairstreamError::Transport(_)) => {
             assert!(controller.state().app_state.selected_device_id.is_none());
             assert_eq!(
                 controller.state().app_state.active_session,

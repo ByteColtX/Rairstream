@@ -1,7 +1,7 @@
 use super::TrayUiError;
 use super::controller::TrayController;
 use super::state::TrayMenuModel;
-use crate::app::SessionCoordinator;
+use crate::app::{SessionCoordinator, SessionState};
 use crate::config::AppConfig;
 use crate::discovery::DiscoveryService;
 use std::collections::HashMap;
@@ -14,6 +14,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 enum TrayAction {
     RefreshDevices,
     SelectDevice(String),
+    StopStreaming,
     Quit,
 }
 
@@ -34,7 +35,7 @@ where
     } = config;
     let mut controller = TrayController::new(coordinator, preferred_device_id);
     let initial_model = controller.refresh_devices();
-    let (initial_menu, mut action_map) = build_menu(&initial_model)?;
+    let (initial_menu, mut action_map) = build_menu(&initial_model, &controller)?;
     let icon = build_icon()?;
     let mut event_loop_builder = EventLoopBuilder::<MenuEvent>::with_user_event();
     let event_loop = event_loop_builder.build();
@@ -62,7 +63,7 @@ where
                 Some(TrayAction::RefreshDevices) => {
                     let model = controller.refresh_devices();
 
-                    match apply_menu_model(&tray_icon, &model) {
+                    match apply_menu_model(&tray_icon, &model, &controller) {
                         Ok(updated_action_map) => action_map = updated_action_map,
                         Err(error) => {
                             eprintln!("{error}");
@@ -79,7 +80,7 @@ where
                         }
                     };
 
-                    match apply_menu_model(&tray_icon, &model) {
+                    match apply_menu_model(&tray_icon, &model, &controller) {
                         Ok(updated_action_map) => action_map = updated_action_map,
                         Err(error) => {
                             eprintln!("{error}");
@@ -87,14 +88,39 @@ where
                         }
                     }
                 }
-                Some(TrayAction::Quit) => *control_flow = ControlFlow::Exit,
+                Some(TrayAction::StopStreaming) => {
+                    let model = match controller.stop_streaming() {
+                        Ok(model) => model,
+                        Err(error) => {
+                            eprintln!("{error}");
+                            controller.menu_model()
+                        }
+                    };
+
+                    match apply_menu_model(&tray_icon, &model, &controller) {
+                        Ok(updated_action_map) => action_map = updated_action_map,
+                        Err(error) => {
+                            eprintln!("{error}");
+                            *control_flow = ControlFlow::ExitWithCode(1);
+                        }
+                    }
+                }
+                Some(TrayAction::Quit) => {
+                    if let Err(error) = controller.stop_streaming() {
+                        eprintln!("{error}");
+                    }
+                    *control_flow = ControlFlow::Exit;
+                }
                 None => {}
             }
         }
     })
 }
 
-fn build_menu(model: &TrayMenuModel) -> Result<(Menu, HashMap<MenuId, TrayAction>), TrayUiError> {
+fn build_menu(
+    model: &TrayMenuModel,
+    controller: &TrayController<impl super::controller::TraySessionService>,
+) -> Result<(Menu, HashMap<MenuId, TrayAction>), TrayUiError> {
     let menu = Menu::new();
     let mut action_map = HashMap::new();
 
@@ -116,6 +142,18 @@ fn build_menu(model: &TrayMenuModel) -> Result<(Menu, HashMap<MenuId, TrayAction
         .map_err(|error| TrayUiError::CreateMenu {
             message: error.to_string(),
         })?;
+
+    if matches!(
+        controller.state().app_state.active_session,
+        SessionState::Streaming { .. }
+    ) {
+        let stop_item = MenuItem::new("停止串流", true, None);
+        action_map.insert(stop_item.id().clone(), TrayAction::StopStreaming);
+        menu.append(&stop_item)
+            .map_err(|error| TrayUiError::CreateMenu {
+                message: error.to_string(),
+            })?;
+    }
 
     let refresh_separator = PredefinedMenuItem::separator();
     menu.append(&refresh_separator)
@@ -166,8 +204,9 @@ fn build_menu(model: &TrayMenuModel) -> Result<(Menu, HashMap<MenuId, TrayAction
 fn apply_menu_model(
     tray_icon: &TrayIcon,
     model: &TrayMenuModel,
+    controller: &TrayController<impl super::controller::TraySessionService>,
 ) -> Result<HashMap<MenuId, TrayAction>, TrayUiError> {
-    let (menu, action_map) = build_menu(model)?;
+    let (menu, action_map) = build_menu(model, controller)?;
 
     tray_icon.set_menu(Some(Box::new(menu)));
     tray_icon

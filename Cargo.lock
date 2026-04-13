@@ -1468,6 +1468,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "mdns-sd",
+ "num-traits",
  "serde",
  "serde_json",
  "tao",

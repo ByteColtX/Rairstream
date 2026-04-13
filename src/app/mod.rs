@@ -4,10 +4,11 @@ pub mod platform;
 mod session;
 
 use crate::audio::AudioCaptureError;
+use crate::transport::AirPlayError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use session::SessionCoordinator;
+pub use session::{PreparedSession, SessionCoordinator};
 
 /// 当前应用支持的目标流协议版本。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +68,8 @@ pub enum RairstreamError {
     InvalidConfiguration { message: String },
     #[error(transparent)]
     AudioCapture(#[from] AudioCaptureError),
+    #[error(transparent)]
+    Transport(#[from] AirPlayError),
 }
 
 #[cfg(test)]

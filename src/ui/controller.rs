@@ -5,6 +5,8 @@ use crate::discovery::DiscoveryService;
 pub trait TraySessionService {
     fn discover(&self) -> Vec<SpeakerDevice>;
     fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
+    fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
+    fn stop_streaming_session(&self) -> Result<AppState, RairstreamError>;
 }
 
 impl<D> TraySessionService for SessionCoordinator<D>
@@ -17,6 +19,14 @@ where
 
     fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
         SessionCoordinator::prepare_session(self, device)
+    }
+
+    fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
+        SessionCoordinator::start_streaming_session(self, device)
+    }
+
+    fn stop_streaming_session(&self) -> Result<AppState, RairstreamError> {
+        SessionCoordinator::stop_streaming_session(self)
     }
 }
 
@@ -68,6 +78,15 @@ where
     }
 
     pub fn select_device(&mut self, device_id: &str) -> Result<TrayMenuModel, RairstreamError> {
+        if matches!(
+            &self.state.app_state.active_session,
+            SessionState::Streaming {
+                device_id: active_device_id,
+            } if active_device_id == device_id
+        ) {
+            return self.stop_streaming();
+        }
+
         let device = self
             .state
             .devices
@@ -77,10 +96,19 @@ where
             .ok_or_else(|| RairstreamError::InvalidConfiguration {
                 message: format!("device id {device_id} not found in tray state"),
             })?;
-        let app_state = self.session_service.prepare_session(device)?;
+        let app_state = self.session_service.start_streaming_session(device)?;
 
         self.state.app_state = app_state;
 
+        Ok(self.menu_model())
+    }
+
+    pub fn stop_streaming(&mut self) -> Result<TrayMenuModel, RairstreamError> {
+        let mut app_state = self.session_service.stop_streaming_session()?;
+        app_state
+            .selected_device_id
+            .clone_from(&self.state.app_state.selected_device_id);
+        self.state.app_state = app_state;
         Ok(self.menu_model())
     }
 
@@ -108,7 +136,7 @@ mod tests {
     use crate::discovery::StubDiscoveryService;
 
     #[derive(Debug, Clone, Copy)]
-    enum PrepareBehavior {
+    enum StartBehavior {
         Success,
         Failure,
     }
@@ -116,7 +144,7 @@ mod tests {
     #[derive(Debug, Clone)]
     struct StubSessionService {
         devices: Vec<SpeakerDevice>,
-        prepare_behavior: PrepareBehavior,
+        start_behavior: StartBehavior,
     }
 
     impl TraySessionService for StubSessionService {
@@ -125,17 +153,36 @@ mod tests {
         }
 
         fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
-            match self.prepare_behavior {
-                PrepareBehavior::Success => Ok(AppState {
+            Ok(AppState {
+                selected_device_id: Some(device.id.clone()),
+                active_session: SessionState::Connecting {
+                    device_id: device.id,
+                },
+            })
+        }
+
+        fn start_streaming_session(
+            &self,
+            device: SpeakerDevice,
+        ) -> Result<AppState, RairstreamError> {
+            match self.start_behavior {
+                StartBehavior::Success => Ok(AppState {
                     selected_device_id: Some(device.id.clone()),
-                    active_session: SessionState::Connecting {
+                    active_session: SessionState::Streaming {
                         device_id: device.id,
                     },
                 }),
-                PrepareBehavior::Failure => Err(RairstreamError::InvalidConfiguration {
-                    message: String::from("stub prepare failure"),
+                StartBehavior::Failure => Err(RairstreamError::InvalidConfiguration {
+                    message: String::from("stub start failure"),
                 }),
             }
+        }
+
+        fn stop_streaming_session(&self) -> Result<AppState, RairstreamError> {
+            Ok(AppState {
+                selected_device_id: None,
+                active_session: SessionState::Idle,
+            })
         }
     }
 
@@ -154,7 +201,7 @@ mod tests {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("living-room", "Living Room")],
-                prepare_behavior: PrepareBehavior::Success,
+                start_behavior: StartBehavior::Success,
             },
             None,
         );
@@ -171,7 +218,7 @@ mod tests {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("kitchen", "Kitchen")],
-                prepare_behavior: PrepareBehavior::Success,
+                start_behavior: StartBehavior::Success,
             },
             Some(String::from("kitchen")),
         );
@@ -189,7 +236,7 @@ mod tests {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("office", "Office")],
-                prepare_behavior: PrepareBehavior::Success,
+                start_behavior: StartBehavior::Success,
             },
             Some(String::from("missing-device")),
         );
@@ -200,11 +247,11 @@ mod tests {
     }
 
     #[test]
-    fn test_select_device_enters_connecting_state() {
+    fn test_select_device_enters_streaming_state() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("bedroom", "Bedroom")],
-                prepare_behavior: PrepareBehavior::Success,
+                start_behavior: StartBehavior::Success,
             },
             None,
         );
@@ -214,14 +261,14 @@ mod tests {
             .select_device("bedroom")
             .expect("stub selection should succeed");
 
-        assert_eq!(model.status_label, "Rairstream：正在连接 Bedroom");
+        assert_eq!(model.status_label, "Rairstream：正在串流 Bedroom");
         assert_eq!(
             controller.state().app_state.selected_device_id.as_deref(),
             Some("bedroom")
         );
         assert!(matches!(
             controller.state().app_state.active_session,
-            SessionState::Connecting { .. }
+            SessionState::Streaming { .. }
         ));
     }
 
@@ -230,7 +277,7 @@ mod tests {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("studio", "Studio")],
-                prepare_behavior: PrepareBehavior::Success,
+                start_behavior: StartBehavior::Success,
             },
             None,
         );
@@ -245,11 +292,11 @@ mod tests {
     }
 
     #[test]
-    fn test_select_device_preserves_state_on_prepare_failure() {
+    fn test_select_device_preserves_state_on_start_failure() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("den", "Den")],
-                prepare_behavior: PrepareBehavior::Failure,
+                start_behavior: StartBehavior::Failure,
             },
             None,
         );
@@ -266,6 +313,27 @@ mod tests {
     }
 
     #[test]
+    fn test_select_streaming_device_stops_session() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+            },
+            None,
+        );
+
+        controller.refresh_devices();
+        controller.select_device("den").unwrap();
+        let model = controller.stop_streaming().unwrap();
+
+        assert_eq!(model.status_label, "Rairstream：已选择 Den");
+        assert_eq!(
+            controller.state().app_state.active_session,
+            SessionState::Idle
+        );
+    }
+
+    #[test]
     fn test_controller_reuses_session_coordinator_runtime_constraints() {
         let coordinator = SessionCoordinator::new(StubDiscoveryService);
         let mut controller = TrayController::new(coordinator, None);
@@ -274,8 +342,7 @@ mod tests {
         let result = controller.select_device("stub-speaker");
 
         if cfg!(target_os = "windows") {
-            let model = result.expect("windows should allow session preparation");
-            assert_eq!(model.status_label, "Rairstream：正在连接 Stub Speaker");
+            assert!(result.is_err());
         } else {
             assert!(result.is_err());
         }
