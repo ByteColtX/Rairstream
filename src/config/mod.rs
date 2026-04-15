@@ -24,7 +24,7 @@ fn is_default_receiver_auth_flow(flow: &ReceiverAuthFlow) -> bool {
     *flow == ReceiverAuthFlow::Modern
 }
 
-/// 现代接收端既有配对记录所需的长期身份材料。
+/// `AirPlay` Receiver 接收端配对记录所需的长期身份材料。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiverCredentials {
     #[serde(default, skip_serializing_if = "is_default_receiver_auth_flow")]

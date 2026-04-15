@@ -138,14 +138,14 @@ pub enum AirPlayError {
     #[error("音频格式不受支持: {message}")]
     UnsupportedAudioFormat { message: String },
     #[error(
-        "目标设备在会话建立前要求认证或配对（常见于 macOS AirPlay Receiver / Apple TV / 受保护接收端），当前 MVP 尚不支持"
+        "目标设备在会话建立前要求认证或配对（常见于 macOS AirPlay Receiver / Apple TV / 受保护接收端）"
     )]
     AuthenticationRequired,
-    #[error("现代 AirPlay 接收端已响应控制探测，但仍需要先完成配对流程")]
+    #[error("AirPlay Receiver 接收端已响应控制探测，但仍需要先完成配对流程")]
     PairingRequired,
-    #[error("现代 AirPlay 接收端需要可用认证凭据或既有配对记录")]
+    #[error("AirPlay Receiver 接收端需要可用认证凭据或配对记录")]
     CredentialsMissing,
-    #[error("现代 AirPlay 认证失败: {message}")]
+    #[error("AirPlay Receiver 认证失败: {message}")]
     AuthenticationFailed { message: String },
     #[error("RTSP 协议错误: {message}")]
     Protocol { message: String },
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn modern_auth_errors_expose_distinct_messages() {
+    fn airplay_receiver_auth_errors_expose_distinct_messages() {
         assert!(
             AirPlayError::PairingRequired
                 .to_string()

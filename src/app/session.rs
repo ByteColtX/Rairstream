@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_transport_session_uses_modern_branch_for_modern_receiver() {
+    fn prepared_transport_session_uses_airplay_receiver_branch() {
         let descriptor = SessionDescriptor::new(
             SpeakerDevice {
                 id: String::from("receiver"),
@@ -455,13 +455,13 @@ mod tests {
                 );
             }
             PreparedTransportSession::ClassicRaop(_) => {
-                panic!("modern receiver should use modern prepare branch");
+                panic!("AirPlay Receiver should use the authenticated prepare branch");
             }
         }
     }
 
     #[test]
-    fn modern_transport_error_maps_to_auth_related_session_state() {
+    fn airplay_receiver_transport_error_maps_to_auth_related_session_state() {
         let pairing_state =
             super::map_transport_state(String::from("receiver"), &AirPlayError::PairingRequired);
         let credential_state =
@@ -501,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn modern_prepare_path_can_surface_auth_session_state_before_streaming() {
+    fn airplay_receiver_prepare_path_can_surface_auth_session_state_before_streaming() {
         let session = ModernAirPlaySession::connect(&SessionDescriptor::new(
             SpeakerDevice {
                 id: String::from("receiver"),

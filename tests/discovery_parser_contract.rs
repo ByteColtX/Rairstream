@@ -126,7 +126,7 @@ fn test_parse_services_deduplicate_across_raop_and_airplay() {
 }
 
 #[test]
-fn test_parse_services_marks_modern_receiver_as_unsupported() {
+fn test_parse_services_marks_airplay_receiver_as_supported() {
     let mut modern_receiver = build_service(
         MdnsTestServiceKind::AirPlay,
         "ByteColt's Appleseed._airplay._tcp.local.",

@@ -26,7 +26,7 @@ fn format_smoke_prepare_error(
 fn format_smoke_transport_error(device_name: &str, error: AirPlayError) -> String {
     match error {
         AirPlayError::AuthenticationRequired => format!(
-            "{}\n提示：你当前选择的是 {}，它更像需要认证/配对的 AirPlay 接收端（例如 macOS AirPlay Receiver）。当前 MVP 仅支持免认证的 AirPlay 1 / RAOP 目标，尚未实现配对认证流程。",
+            "{}\n提示：你当前选择的是 {}，它更像需要配对或认证的 AirPlay 接收端（例如 macOS AirPlay Receiver 或 Apple TV）。请在托盘流程中完成配对，或检查本地是否已有可复用的配对记录。",
             AirPlayError::AuthenticationRequired,
             device_name
         ),
@@ -36,12 +36,12 @@ fn format_smoke_transport_error(device_name: &str, error: AirPlayError) -> Strin
             device_name
         ),
         AirPlayError::CredentialsMissing => format!(
-            "{}\n提示：{} 已进入现代认证流程，但当前配置里没有可复用的配对记录，请先完成首次配对。",
+            "{}\n提示：{} 需要可复用的 AirPlay Receiver 配对记录，但当前配置中没有可用记录，请先完成首次配对。",
             AirPlayError::CredentialsMissing,
             device_name
         ),
         AirPlayError::AuthenticationFailed { message } => format!(
-            "现代 AirPlay 认证失败: {message}\n提示：{device_name} 的既有配对记录可能已失效，或设备要求重新配对。"
+            "AirPlay Receiver 认证失败: {message}\n提示：{device_name} 的现有配对记录可能已失效，或设备要求重新配对。"
         ),
         other => other.to_string(),
     }
@@ -362,7 +362,7 @@ mod tests {
         );
 
         assert!(pairing.contains("首次配对"));
-        assert!(missing.contains("没有可复用的配对记录"));
+        assert!(missing.contains("没有可用记录"));
         assert!(failed.contains("forbidden"));
     }
 

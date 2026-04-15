@@ -371,7 +371,7 @@ struct DecodedReceiverCredentials {
     receiver_verifying_key: VerifyingKey,
 }
 
-/// 现代接收端的最小准备态。
+/// `AirPlay` Receiver 接收端的最小准备态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModernAirPlaySession {
     descriptor: SessionDescriptor,
@@ -402,14 +402,14 @@ impl ModernAirPlaySession {
         info!(
             endpoint = %endpoint,
             device_id = %self.descriptor.device.id,
-            "开始执行现代 AirPlay 认证恢复"
+            "开始执行AirPlay Receiver 认证恢复"
         );
         let mut rtsp_client = RtspClient::connect(&endpoint)?;
         let info_response = rtsp_client.send(&self.info_request())?;
         debug!(
             endpoint = %endpoint,
             status_code = info_response.status.code,
-            "现代 AirPlay /info 已返回响应"
+            "AirPlay Receiver /info 已返回响应"
         );
 
         if self.descriptor.receiver_credentials.is_none() {
@@ -456,13 +456,13 @@ impl ModernAirPlaySession {
         info!(
             endpoint = %endpoint,
             device_id = %self.descriptor.device.id,
-            "开始执行现代 AirPlay 首次配对"
+            "开始执行AirPlay Receiver 首次配对"
         );
         let mut rtsp_client = RtspClient::connect(&endpoint)?;
         let _info_response = rtsp_client.send(&self.info_request())?;
         debug!(
             endpoint = %endpoint,
-            "现代 AirPlay 首配前 /info 已返回响应"
+            "AirPlay Receiver 首配前 /info 已返回响应"
         );
         complete_legacy_pairing(&mut rtsp_client, &mut self, pin)
     }
@@ -517,7 +517,7 @@ impl ModernAirPlaySession {
     }
 }
 
-/// 现代接收端握手完成后的连接句柄。
+/// `AirPlay` Receiver 接收端握手完成后的连接句柄。
 #[derive(Debug)]
 pub struct ModernAirPlayConnection {
     raop_connection: Box<RaopConnection>,
@@ -1251,7 +1251,7 @@ fn map_modern_auth_probe_response(
             message: String::from("设备拒绝当前认证上下文或匿名控制探测"),
         }),
         code => Err(AirPlayError::Protocol {
-            message: format!("现代 AirPlay /info 返回了未预期状态码 {code}"),
+            message: format!("AirPlay Receiver /info 返回了未预期状态码 {code}"),
         }),
     }
 }
@@ -1265,7 +1265,7 @@ fn detect_initial_pairing_requirement(
     debug!(
         endpoint = %endpoint,
         status_code = pair_pin_start_response.status.code,
-        "现代 AirPlay 无本地凭据，主动探测 /pair-pin-start"
+        "AirPlay Receiver 无本地凭据，主动探测 /pair-pin-start"
     );
     map_pair_pin_start_response(&pair_pin_start_response)?;
     Err(AirPlayError::PairingRequired)
@@ -1671,7 +1671,7 @@ fn receiver_pairing_id_from_device(
         .pairing_id
         .clone()
         .ok_or_else(|| AirPlayError::InvalidSession {
-            message: String::from("设备缺少 modern AirPlay pairing id（mDNS pi/gid）"),
+            message: String::from("设备缺少 AirPlay Receiver pairing id（mDNS pi/gid）"),
         })
 }
 
