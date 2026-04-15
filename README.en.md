@@ -32,6 +32,20 @@ Rairstream is under active development, but the core end-to-end path is already 
 - Persist pairing credentials and restore authentication on later connections
 - Start, stop, and switch devices from a system tray app
 - Run a minimal `smoke` mode from the CLI for debugging
+- The current sender path outputs fixed `44.1 kHz / 16-bit / 2-channel PCM (L16/44100/2)`; multi-channel input is downmixed to stereo before transmission
+
+### Current audio profile
+
+| Item | Current value |
+| --- | --- |
+| Capture backend | `Windows WASAPI shared loopback capture` (event-driven) |
+| Output codec | `L16` |
+| Output sample rate | `44.1 kHz` |
+| Output bit depth | `16-bit` |
+| Output channels | `2` |
+| RTP frames per packet | `352` frames |
+| Startup latency | `11025` frames (about `250 ms @ 44.1 kHz`) |
+| Multi-channel input handling | Downmixed to stereo |
 
 ## Limitations
 
@@ -72,6 +86,39 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 - `smoke <DEVICE_FILTER>`: match by device name, ID, or host
 - `-v` / `-vv`: enable debug / trace logging
 - `--log-level <error|warn|info|debug|trace>`: set the log level explicitly
+
+## Roadmap / TODO
+
+### Audio
+
+- [ ] Add sender-side volume control in the tray UI with a `0–100%` range
+- [ ] Add a mute toggle
+- [ ] Evaluate receiver-side volume sync and dB mapping
+- [ ] Keep the current fixed sender profile of `44.1 kHz / 16-bit / 2-channel PCM (L16/44100/2)` while evaluating configurable output profiles
+- [ ] Explicitly cover `44.1 kHz` and `48 kHz` input paths
+- [ ] Explicitly cover `16-bit / 24-bit / 32-bit` input format conversion
+- [ ] Define handling for `1 / 2 / 6 / 8` channel input layouts (multi-channel input is currently downmixed to `2` channels)
+- [ ] Evaluate reducing startup latency from the current `11025` frames (about `250 ms @ 44.1 kHz`)
+- [ ] Continue improving buffering, keepalive behavior, and long-run stability
+
+### Capture
+
+- [ ] Add `WASAPI process loopback` alongside the current `WASAPI shared loopback`
+- [ ] Support per-app audio capture, such as streaming only a browser, player, or game
+
+### Desktop UX
+
+- [ ] Auto reconnect
+- [ ] Remember the last-used device
+- [ ] Launch at startup
+- [ ] Start minimized to tray
+- [ ] Clearer recovery paths after pairing / authentication failures
+
+### Compatibility & validation
+
+- [ ] Expand real-device validation and maintain a list of verified receivers, starting with Apple TV, HomePod, and third-party speakers / AVRs
+- [ ] Continue improving compatibility across different AirPlay Receiver implementations
+- [ ] Evaluate broader AirPlay 2 receiver compatibility on top of the current audio streaming path
 
 ## Development
 
