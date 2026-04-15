@@ -1,4 +1,4 @@
-use rairstream::app::{RairstreamError, SessionCoordinator, SessionState};
+use rairstream::app::{RairstreamError, SessionCoordinator};
 use rairstream::config::AppConfig;
 use rairstream::discovery::StubDiscoveryService;
 

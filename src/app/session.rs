@@ -548,10 +548,19 @@ mod tests {
 
         let error = coordinator.prepare_transport_session(device).unwrap_err();
 
-        assert!(matches!(
-            error,
-            RairstreamError::Transport(AirPlayError::AuthenticationRequired)
-        ));
+        if cfg!(target_os = "windows") {
+            assert!(matches!(
+                error,
+                RairstreamError::Transport(AirPlayError::AuthenticationRequired)
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                RairstreamError::NotImplemented {
+                    feature: "non-Windows runtime support"
+                }
+            ));
+        }
     }
 
     #[test]
@@ -573,9 +582,18 @@ mod tests {
 
         let error = coordinator.start_streaming_session(device).unwrap_err();
 
-        assert!(matches!(
-            error,
-            RairstreamError::Transport(AirPlayError::AuthenticationRequired)
-        ));
+        if cfg!(target_os = "windows") {
+            assert!(matches!(
+                error,
+                RairstreamError::Transport(AirPlayError::AuthenticationRequired)
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                RairstreamError::NotImplemented {
+                    feature: "non-Windows runtime support"
+                }
+            ));
+        }
     }
 }

@@ -113,6 +113,10 @@ impl AppConfig {
         self.paired_receivers
             .insert(device_id.into(), receiver_credentials);
     }
+
+    pub fn set_preferred_device_id(&mut self, device_id: Option<String>) {
+        self.preferred_device_id = device_id;
+    }
 }
 
 fn migrate_missing_receiver_auth_flow_to_legacy_pin(value: &mut serde_json::Value) {

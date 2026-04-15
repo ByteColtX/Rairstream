@@ -126,8 +126,12 @@ where
         }
 
         let device = self.find_device(device_id)?;
-        let app_state = self.session_service.start_streaming_session(device)?;
+        let app_state = self
+            .session_service
+            .start_streaming_session(device.clone())?;
 
+        self.config.set_preferred_device_id(Some(device.id.clone()));
+        self.config.save()?;
         self.state.app_state = app_state;
 
         Ok(self.menu_model())
@@ -171,6 +175,9 @@ where
         app_state
             .selected_device_id
             .clone_from(&self.state.app_state.selected_device_id);
+        self.config
+            .set_preferred_device_id(app_state.selected_device_id.clone());
+        self.config.save()?;
         self.state.app_state = app_state;
         Ok(self.menu_model())
     }
@@ -409,6 +416,10 @@ mod tests {
             controller.state().app_state.selected_device_id.as_deref(),
             Some("bedroom")
         );
+        assert_eq!(
+            controller.config.preferred_device_id.as_deref(),
+            Some("bedroom")
+        );
         assert!(matches!(
             controller.state().app_state.active_session,
             SessionState::Streaming { .. }
@@ -568,6 +579,10 @@ mod tests {
         let model = controller.stop_streaming().unwrap();
 
         assert_eq!(model.status_label, "Rairstream：已选择 Den");
+        assert_eq!(
+            controller.config.preferred_device_id.as_deref(),
+            Some("den")
+        );
         assert_eq!(
             controller.state().app_state.active_session,
             SessionState::Idle

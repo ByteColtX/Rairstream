@@ -279,7 +279,7 @@ impl WindowsLoopbackCapture {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = sink;
+            drop(sink);
             let _ = config;
             Err(AudioCaptureError::UnsupportedPlatform)
         }
