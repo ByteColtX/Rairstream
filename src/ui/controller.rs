@@ -81,6 +81,7 @@ where
                     active_session: SessionState::Idle,
                 },
                 devices: Vec::new(),
+                last_error: None,
             },
         }
     }
@@ -105,6 +106,7 @@ where
         self.state.devices = devices;
         self.state.app_state.selected_device_id = selected_device_id;
         self.state.app_state.active_session = SessionState::Idle;
+        self.state.last_error = None;
 
         info!(
             device_count = self.state.devices.len(),
@@ -133,6 +135,7 @@ where
         self.config.set_preferred_device_id(Some(device.id.clone()));
         self.config.save()?;
         self.state.app_state = app_state;
+        self.state.last_error = None;
 
         Ok(self.menu_model())
     }
@@ -156,6 +159,7 @@ where
         };
         let app_state = self.session_service.start_streaming_session(device)?;
         self.state.app_state = app_state;
+        self.state.last_error = None;
         Ok(self.menu_model())
     }
 
@@ -166,6 +170,7 @@ where
             selected_device_id: Some(device.id),
             active_session: SessionState::Idle,
         };
+        self.state.last_error = None;
         Ok(self.menu_model())
     }
 
@@ -179,6 +184,7 @@ where
             .set_preferred_device_id(app_state.selected_device_id.clone());
         self.config.save()?;
         self.state.app_state = app_state;
+        self.state.last_error = None;
         Ok(self.menu_model())
     }
 
@@ -193,6 +199,44 @@ where
                     .any(|device| device.id.as_str() == selected_device_id.as_str())
             })
             .cloned()
+    }
+
+    pub fn handle_error(&mut self, device_id: Option<&str>, error: &RairstreamError) {
+        self.state.last_error = Some(self.describe_error(device_id, error));
+    }
+
+    fn describe_error(&self, device_id: Option<&str>, error: &RairstreamError) -> String {
+        let device_name = device_id.and_then(|device_id| {
+            self.state
+                .devices
+                .iter()
+                .find(|device| device.id == device_id)
+                .map(|device| device.name.as_str())
+        });
+
+        match error {
+            RairstreamError::Transport(crate::transport::AirPlayError::PairingRequired) => {
+                match device_name {
+                    Some(device_name) => {
+                        format!("{device_name} 需要先完成首次配对，请重新选择并输入 PIN")
+                    }
+                    None => String::from("目标设备需要先完成首次配对，请重新选择并输入 PIN"),
+                }
+            }
+            RairstreamError::Transport(crate::transport::AirPlayError::CredentialsMissing) => {
+                match device_name {
+                    Some(device_name) => format!("{device_name} 缺少可用配对记录，请重新配对"),
+                    None => String::from("目标设备缺少可用配对记录，请重新配对"),
+                }
+            }
+            RairstreamError::Transport(crate::transport::AirPlayError::AuthenticationFailed {
+                ..
+            }) => match device_name {
+                Some(device_name) => format!("{device_name} 认证失败，请重新配对后再试"),
+                None => String::from("目标设备认证失败，请重新配对后再试"),
+            },
+            _ => error.to_string(),
+        }
     }
 
     fn find_device(&self, device_id: &str) -> Result<SpeakerDevice, RairstreamError> {
@@ -586,6 +630,58 @@ mod tests {
         assert_eq!(
             controller.state().app_state.active_session,
             SessionState::Idle
+        );
+    }
+
+    #[test]
+    fn test_handle_error_maps_authentication_recovery_message() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.handle_error(
+            Some("den"),
+            &RairstreamError::Transport(crate::transport::AirPlayError::AuthenticationFailed {
+                message: String::from("forbidden"),
+            }),
+        );
+
+        assert_eq!(
+            controller.state().last_error.as_deref(),
+            Some("Den 认证失败，请重新配对后再试")
+        );
+        assert_eq!(
+            controller.menu_model().status_label,
+            "Rairstream：Den 认证失败，请重新配对后再试"
+        );
+    }
+
+    #[test]
+    fn test_handle_error_maps_missing_credentials_recovery_message() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.handle_error(
+            Some("den"),
+            &RairstreamError::Transport(crate::transport::AirPlayError::CredentialsMissing),
+        );
+
+        assert_eq!(
+            controller.state().last_error.as_deref(),
+            Some("Den 缺少可用配对记录，请重新配对")
         );
     }
 

@@ -1,7 +1,7 @@
 use super::TrayUiError;
 use super::controller::TrayController;
 use super::state::TrayMenuModel;
-use crate::app::{SessionCoordinator, SessionState};
+use crate::app::{RairstreamError, SessionCoordinator, SessionState};
 use crate::config::AppConfig;
 use crate::discovery::DiscoveryService;
 use inputbox::InputBox;
@@ -131,6 +131,7 @@ fn handle_select_device(
         }
         Err(error) => {
             warn!(device_id, error = %error, "处理设备选择失败，保留当前菜单状态");
+            controller.handle_error(Some(device_id), &error);
             controller.menu_model()
         }
     }
@@ -145,6 +146,7 @@ fn handle_pairing_prompt(
             Ok(model) => model,
             Err(error) => {
                 warn!(device_id, error = %error, "提交配对 PIN 失败，保留当前菜单状态");
+                controller.handle_error(Some(device_id), &error);
                 controller.menu_model()
             }
         },
@@ -152,11 +154,18 @@ fn handle_pairing_prompt(
             Ok(model) => model,
             Err(error) => {
                 warn!(device_id, error = %error, "取消配对输入失败，保留当前菜单状态");
+                controller.handle_error(Some(device_id), &error);
                 controller.menu_model()
             }
         },
         Err(error) => {
             warn!(device_id, error = %error, "拉起 PIN 输入框失败，保留当前菜单状态");
+            controller.handle_error(
+                Some(device_id),
+                &RairstreamError::InvalidConfiguration {
+                    message: error.to_string(),
+                },
+            );
             controller.menu_model()
         }
     }

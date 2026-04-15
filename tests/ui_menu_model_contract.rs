@@ -35,6 +35,7 @@ fn test_menu_model_for_idle_selection_shows_selected_device_label() {
             active_session: SessionState::Idle,
         },
         devices: vec![build_device("living-room", "Living Room")],
+        last_error: None,
     };
 
     let model = build_tray_menu_model(&state);
@@ -54,6 +55,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        last_error: None,
     };
     let pairing_state = TrayAppState {
         app_state: AppState {
@@ -63,6 +65,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        last_error: None,
     };
     let authenticating_state = TrayAppState {
         app_state: AppState {
@@ -72,6 +75,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        last_error: None,
     };
     let streaming_state = TrayAppState {
         app_state: AppState {
@@ -81,6 +85,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        last_error: None,
     };
 
     let connecting_model = build_tray_menu_model(&connecting_state);
@@ -118,6 +123,7 @@ fn test_menu_model_for_discovering_disables_refresh_and_device_actions() {
             active_session: SessionState::Discovering,
         },
         devices: vec![build_device("office", "Office")],
+        last_error: None,
     };
 
     let model = build_tray_menu_model(&state);

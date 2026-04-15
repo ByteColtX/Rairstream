@@ -4,6 +4,7 @@ use crate::app::{AppState, SessionState, SpeakerDevice};
 pub struct TrayAppState {
     pub app_state: AppState,
     pub devices: Vec<SpeakerDevice>,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +46,10 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
 }
 
 fn build_status_label(state: &TrayAppState) -> String {
+    if let Some(last_error) = state.last_error.as_deref() {
+        return format!("Rairstream：{last_error}");
+    }
+
     match &state.app_state.active_session {
         SessionState::Idle => match state.app_state.selected_device_id.as_deref() {
             Some(device_id) => match resolve_device_name(&state.devices, device_id) {
@@ -150,6 +155,7 @@ mod tests {
                 active_session: SessionState::Idle,
             },
             devices: vec![build_device("living-room", "Living Room")],
+            last_error: None,
         };
 
         let model = build_tray_menu_model(&state);
@@ -170,6 +176,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            last_error: None,
         };
 
         let model = build_tray_menu_model(&state);
@@ -188,6 +195,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            last_error: None,
         };
         let authenticating_state = TrayAppState {
             app_state: AppState {
@@ -197,6 +205,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            last_error: None,
         };
 
         let pairing_model = build_tray_menu_model(&pairing_state);
@@ -222,6 +231,7 @@ mod tests {
                 active_session: SessionState::Discovering,
             },
             devices: vec![build_device("office", "Office")],
+            last_error: None,
         };
 
         let model = build_tray_menu_model(&state);
@@ -229,5 +239,26 @@ mod tests {
         assert_eq!(model.status_label, "Rairstream：正在刷新设备");
         assert!(!model.refresh_enabled);
         assert!(!model.device_items[0].enabled);
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_prioritizes_last_error() {
+        let state = TrayAppState {
+            app_state: AppState {
+                selected_device_id: Some(String::from("kitchen")),
+                active_session: SessionState::Authenticating {
+                    device_id: String::from("kitchen"),
+                },
+            },
+            devices: vec![build_device("kitchen", "Kitchen")],
+            last_error: Some(String::from("Kitchen 认证失败，请重新配对后再试")),
+        };
+
+        let model = build_tray_menu_model(&state);
+
+        assert_eq!(
+            model.status_label,
+            "Rairstream：Kitchen 认证失败，请重新配对后再试"
+        );
     }
 }
