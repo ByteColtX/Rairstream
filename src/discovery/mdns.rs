@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use mdns_sd::{ServiceDaemon, ServiceEvent};
+use mdns_sd::{ServiceDaemon, ServiceEvent, TxtProperty};
+use tracing::trace;
 
 use crate::app::SpeakerDevice;
 
@@ -79,7 +80,35 @@ fn discover_service_type(
 
         if let ServiceEvent::ServiceResolved(service) = event {
             let device_id = service.get_property_val_str("deviceid").map(String::from);
+            let pairing_id = service
+                .get_property_val_str("pi")
+                .or_else(|| service.get_property_val_str("gid"))
+                .map(String::from);
+            let model_or_am = service
+                .get_property_val_str("am")
+                .or_else(|| service.get_property_val_str("model"))
+                .map(String::from);
+            let features = service.get_property_val_str("features").map(String::from);
+            let flags = service
+                .get_property_val_str("flags")
+                .or_else(|| service.get_property_val_str("sf"))
+                .map(String::from);
+            let srcvers = service
+                .get_property_val_str("srcvers")
+                .or_else(|| service.get_property_val_str("vs"))
+                .map(String::from);
+            let receiver_public_key = service.get_property_val_str("pk").map(String::from);
             let ipv4_addresses = service.get_addresses_v4().into_iter().collect();
+            let txt_properties = format_txt_properties(service.get_properties().iter());
+            trace!(
+                service_kind = ?service_kind,
+                fullname = service.get_fullname(),
+                hostname = service.get_hostname(),
+                port = service.get_port(),
+                ipv4_addresses = ?service.get_addresses_v4(),
+                txt_properties = %txt_properties,
+                "mDNS 服务解析完成"
+            );
 
             services.push(ResolvedMdnsService {
                 service_kind,
@@ -87,6 +116,12 @@ fn discover_service_type(
                 port: service.port,
                 ipv4_addresses,
                 device_id,
+                pairing_id,
+                model_or_am,
+                features,
+                flags,
+                srcvers,
+                receiver_public_key,
             });
         }
     }
@@ -94,4 +129,22 @@ fn discover_service_type(
     let _ = daemon.stop_browse(service_type);
 
     services
+}
+
+fn format_txt_properties<'a>(properties: impl Iterator<Item = &'a TxtProperty>) -> String {
+    let formatted: Vec<String> = properties
+        .map(|property| {
+            let value = property.val().map_or_else(
+                || String::from("<flag>"),
+                |_| property.val_str().to_string(),
+            );
+            format!("{}={value}", property.key())
+        })
+        .collect();
+
+    if formatted.is_empty() {
+        return String::from("<empty>");
+    }
+
+    formatted.join(", ")
 }

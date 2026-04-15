@@ -4,9 +4,11 @@ use super::state::TrayMenuModel;
 use crate::app::{SessionCoordinator, SessionState};
 use crate::config::AppConfig;
 use crate::discovery::DiscoveryService;
+use inputbox::InputBox;
 use std::collections::HashMap;
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tracing::{error, info, warn};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
@@ -29,11 +31,7 @@ where
         return Err(TrayUiError::UnsupportedPlatform);
     }
 
-    let AppConfig {
-        preferred_device_id,
-        ..
-    } = config;
-    let mut controller = TrayController::new(coordinator, preferred_device_id);
+    let mut controller = TrayController::new(coordinator, config);
     let initial_model = controller.refresh_devices();
     let (initial_menu, mut action_map) = build_menu(&initial_model, &controller)?;
     let icon = build_icon()?;
@@ -59,62 +57,109 @@ where
         *control_flow = ControlFlow::Wait;
 
         if let Event::UserEvent(menu_event) = event {
-            match action_map.get(&menu_event.id).cloned() {
-                Some(TrayAction::RefreshDevices) => {
-                    let model = controller.refresh_devices();
-
-                    match apply_menu_model(&tray_icon, &model, &controller) {
-                        Ok(updated_action_map) => action_map = updated_action_map,
-                        Err(error) => {
-                            eprintln!("{error}");
-                            *control_flow = ControlFlow::ExitWithCode(1);
-                        }
-                    }
-                }
-                Some(TrayAction::SelectDevice(device_id)) => {
-                    let model = match controller.select_device(&device_id) {
-                        Ok(model) => model,
-                        Err(error) => {
-                            eprintln!("{error}");
-                            controller.menu_model()
-                        }
-                    };
-
-                    match apply_menu_model(&tray_icon, &model, &controller) {
-                        Ok(updated_action_map) => action_map = updated_action_map,
-                        Err(error) => {
-                            eprintln!("{error}");
-                            *control_flow = ControlFlow::ExitWithCode(1);
-                        }
-                    }
-                }
-                Some(TrayAction::StopStreaming) => {
-                    let model = match controller.stop_streaming() {
-                        Ok(model) => model,
-                        Err(error) => {
-                            eprintln!("{error}");
-                            controller.menu_model()
-                        }
-                    };
-
-                    match apply_menu_model(&tray_icon, &model, &controller) {
-                        Ok(updated_action_map) => action_map = updated_action_map,
-                        Err(error) => {
-                            eprintln!("{error}");
-                            *control_flow = ControlFlow::ExitWithCode(1);
-                        }
-                    }
-                }
-                Some(TrayAction::Quit) => {
-                    if let Err(error) = controller.stop_streaming() {
-                        eprintln!("{error}");
-                    }
-                    *control_flow = ControlFlow::Exit;
-                }
-                None => {}
-            }
+            handle_menu_event(
+                &mut controller,
+                &tray_icon,
+                &mut action_map,
+                &menu_event.id,
+                control_flow,
+            );
         }
     })
+}
+
+fn handle_menu_event(
+    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    tray_icon: &TrayIcon,
+    action_map: &mut HashMap<MenuId, TrayAction>,
+    menu_id: &MenuId,
+    control_flow: &mut ControlFlow,
+) {
+    let model = match action_map.get(menu_id).cloned() {
+        Some(TrayAction::RefreshDevices) => {
+            info!("托盘菜单触发刷新设备");
+            controller.refresh_devices()
+        }
+        Some(TrayAction::SelectDevice(device_id)) => handle_select_device(controller, &device_id),
+        Some(TrayAction::StopStreaming) => {
+            info!("托盘菜单触发停止串流");
+            match controller.stop_streaming() {
+                Ok(model) => model,
+                Err(error) => {
+                    warn!(error = %error, "停止串流失败，保留当前菜单状态");
+                    controller.menu_model()
+                }
+            }
+        }
+        Some(TrayAction::Quit) => {
+            info!("托盘菜单触发退出");
+            if let Err(error) = controller.stop_streaming() {
+                warn!(error = %error, "退出前停止串流失败");
+            }
+            *control_flow = ControlFlow::Exit;
+            return;
+        }
+        None => return,
+    };
+
+    match apply_menu_model(tray_icon, &model, controller) {
+        Ok(updated_action_map) => *action_map = updated_action_map,
+        Err(error) => {
+            error!(error = %error, "应用托盘菜单状态失败，准备退出事件循环");
+            *control_flow = ControlFlow::ExitWithCode(1);
+        }
+    }
+}
+
+fn handle_select_device(
+    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    device_id: &str,
+) -> TrayMenuModel {
+    info!(device_id, "托盘菜单触发设备选择");
+    match controller.select_device(device_id) {
+        Ok(model) => {
+            let awaiting_pairing_device_id = match &controller.state().app_state.active_session {
+                SessionState::AwaitingPairing { device_id } => Some(device_id.clone()),
+                _ => None,
+            };
+            match awaiting_pairing_device_id {
+                Some(awaiting_pairing_device_id) => {
+                    handle_pairing_prompt(controller, &awaiting_pairing_device_id)
+                }
+                None => model,
+            }
+        }
+        Err(error) => {
+            warn!(device_id, error = %error, "处理设备选择失败，保留当前菜单状态");
+            controller.menu_model()
+        }
+    }
+}
+
+fn handle_pairing_prompt(
+    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    device_id: &str,
+) -> TrayMenuModel {
+    match prompt_pairing_pin(controller, device_id) {
+        Ok(Some(pin)) => match controller.submit_pairing_pin(device_id, &pin) {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(device_id, error = %error, "提交配对 PIN 失败，保留当前菜单状态");
+                controller.menu_model()
+            }
+        },
+        Ok(None) => match controller.cancel_pairing(device_id) {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(device_id, error = %error, "取消配对输入失败，保留当前菜单状态");
+                controller.menu_model()
+            }
+        },
+        Err(error) => {
+            warn!(device_id, error = %error, "拉起 PIN 输入框失败，保留当前菜单状态");
+            controller.menu_model()
+        }
+    }
 }
 
 fn build_menu(
@@ -216,6 +261,27 @@ fn apply_menu_model(
         })?;
 
     Ok(action_map)
+}
+
+fn prompt_pairing_pin(
+    controller: &TrayController<impl super::controller::TraySessionService>,
+    device_id: &str,
+) -> Result<Option<String>, TrayUiError> {
+    let device_name = controller
+        .state()
+        .devices
+        .iter()
+        .find(|device| device.id == device_id)
+        .map_or(device_id, |device| device.name.as_str());
+    InputBox::new()
+        .title("Rairstream 配对")
+        .prompt(format!("请输入 {device_name} 当前显示的 AirPlay PIN"))
+        .ok_label("继续配对")
+        .cancel_label("取消")
+        .show()
+        .map_err(|error| TrayUiError::Initialize {
+            message: error.to_string(),
+        })
 }
 
 fn build_icon() -> Result<Icon, TrayUiError> {

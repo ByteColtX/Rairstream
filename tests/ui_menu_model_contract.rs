@@ -1,4 +1,6 @@
-use rairstream::app::{AirPlayGeneration, AppState, SessionState, SpeakerDevice};
+use rairstream::app::{
+    AirPlayGeneration, AppState, DeviceSupport, ReceiverKind, SessionState, SpeakerDevice,
+};
 use rairstream::ui::{TrayAppState, build_tray_menu_model};
 
 fn build_device(id: &str, name: &str) -> SpeakerDevice {
@@ -8,6 +10,10 @@ fn build_device(id: &str, name: &str) -> SpeakerDevice {
         host: String::from("192.168.1.20"),
         port: 7000,
         generation: AirPlayGeneration::AirPlay1,
+        pairing_id: None,
+        receiver_public_key: None,
+        receiver_kind: ReceiverKind::ClassicRaop,
+        support: DeviceSupport::Supported,
     }
 }
 
@@ -39,11 +45,29 @@ fn test_menu_model_for_idle_selection_shows_selected_device_label() {
 }
 
 #[test]
-fn test_menu_model_for_connecting_and_streaming_marks_device_status() {
+fn test_menu_model_for_connection_related_states_marks_device_status() {
     let connecting_state = TrayAppState {
         app_state: AppState {
             selected_device_id: Some(String::from("bedroom")),
             active_session: SessionState::Connecting {
+                device_id: String::from("bedroom"),
+            },
+        },
+        devices: vec![build_device("bedroom", "Bedroom")],
+    };
+    let pairing_state = TrayAppState {
+        app_state: AppState {
+            selected_device_id: Some(String::from("bedroom")),
+            active_session: SessionState::AwaitingPairing {
+                device_id: String::from("bedroom"),
+            },
+        },
+        devices: vec![build_device("bedroom", "Bedroom")],
+    };
+    let authenticating_state = TrayAppState {
+        app_state: AppState {
+            selected_device_id: Some(String::from("bedroom")),
+            active_session: SessionState::Authenticating {
                 device_id: String::from("bedroom"),
             },
         },
@@ -60,6 +84,8 @@ fn test_menu_model_for_connecting_and_streaming_marks_device_status() {
     };
 
     let connecting_model = build_tray_menu_model(&connecting_state);
+    let pairing_model = build_tray_menu_model(&pairing_state);
+    let authenticating_model = build_tray_menu_model(&authenticating_state);
     let streaming_model = build_tray_menu_model(&streaming_state);
 
     assert_eq!(
@@ -69,6 +95,16 @@ fn test_menu_model_for_connecting_and_streaming_marks_device_status() {
     assert_eq!(
         connecting_model.device_items[0].label,
         "● Bedroom（连接中）"
+    );
+    assert_eq!(pairing_model.status_label, "Rairstream：等待配对 Bedroom");
+    assert_eq!(pairing_model.device_items[0].label, "● Bedroom（等待配对）");
+    assert_eq!(
+        authenticating_model.status_label,
+        "Rairstream：正在认证 Bedroom"
+    );
+    assert_eq!(
+        authenticating_model.device_items[0].label,
+        "● Bedroom（认证中）"
     );
     assert_eq!(streaming_model.status_label, "Rairstream：正在串流 Bedroom");
     assert_eq!(streaming_model.device_items[0].label, "● Bedroom（串流中）");

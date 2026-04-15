@@ -4,6 +4,7 @@ pub mod platform;
 mod session;
 
 use crate::audio::AudioCaptureError;
+use crate::config::ConfigError;
 use crate::transport::AirPlayError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -17,6 +18,30 @@ pub enum AirPlayGeneration {
     AirPlay1,
 }
 
+/// 当前 MVP 对目标设备的支持状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DeviceSupport {
+    #[default]
+    Supported,
+    Unsupported {
+        reason: UnsupportedReason,
+    },
+}
+
+/// 当前 MVP 尚未覆盖的设备限制原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnsupportedReason {
+    AuthenticationRequiredReceiver,
+}
+
+/// 设备会话建立时需要走的握手路径。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ReceiverKind {
+    #[default]
+    ClassicRaop,
+    ModernAirPlayAuth,
+}
+
 /// 发现到的输出设备摘要。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpeakerDevice {
@@ -25,6 +50,14 @@ pub struct SpeakerDevice {
     pub host: String,
     pub port: u16,
     pub generation: AirPlayGeneration,
+    #[serde(default)]
+    pub pairing_id: Option<String>,
+    #[serde(default)]
+    pub receiver_public_key: Option<String>,
+    #[serde(default)]
+    pub receiver_kind: ReceiverKind,
+    #[serde(default)]
+    pub support: DeviceSupport,
 }
 
 impl SpeakerDevice {
@@ -56,6 +89,8 @@ pub enum SessionState {
     Idle,
     Discovering,
     Connecting { device_id: String },
+    AwaitingPairing { device_id: String },
+    Authenticating { device_id: String },
     Streaming { device_id: String },
 }
 
@@ -70,11 +105,15 @@ pub enum RairstreamError {
     AudioCapture(#[from] AudioCaptureError),
     #[error(transparent)]
     Transport(#[from] AirPlayError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AirPlayGeneration, AppState, SessionState, SpeakerDevice};
+    use super::{
+        AirPlayGeneration, AppState, DeviceSupport, ReceiverKind, SessionState, SpeakerDevice,
+    };
 
     #[test]
     fn speaker_device_builds_endpoint() {
@@ -84,6 +123,10 @@ mod tests {
             host: String::from("192.168.1.50"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
+            pairing_id: None,
+            receiver_public_key: None,
+            receiver_kind: ReceiverKind::ClassicRaop,
+            support: DeviceSupport::Supported,
         };
 
         assert_eq!(device.endpoint(), "192.168.1.50:7000");

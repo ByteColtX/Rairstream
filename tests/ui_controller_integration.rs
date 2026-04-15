@@ -1,11 +1,12 @@
 use rairstream::app::{RairstreamError, SessionCoordinator, SessionState};
+use rairstream::config::AppConfig;
 use rairstream::discovery::StubDiscoveryService;
 use rairstream::ui::TrayController;
 
 #[test]
 fn test_refresh_with_real_session_coordinator_populates_menu_from_discovery() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
-    let mut controller = TrayController::new(coordinator, None);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
 
     let model = controller.refresh_devices();
 
@@ -21,7 +22,13 @@ fn test_refresh_with_real_session_coordinator_populates_menu_from_discovery() {
 #[test]
 fn test_refresh_preserves_preferred_device_when_device_still_exists() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
-    let mut controller = TrayController::new(coordinator, Some(String::from("stub-speaker")));
+    let mut controller = TrayController::new(
+        coordinator,
+        AppConfig {
+            preferred_device_id: Some(String::from("stub-speaker")),
+            ..AppConfig::default()
+        },
+    );
 
     let model = controller.refresh_devices();
 
@@ -37,7 +44,7 @@ fn test_refresh_preserves_preferred_device_when_device_still_exists() {
 #[test]
 fn test_select_device_transitions_or_returns_runtime_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
-    let mut controller = TrayController::new(coordinator, None);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
 
     controller.refresh_devices();
     let result = controller.select_device("stub-speaker");
@@ -55,7 +62,7 @@ fn test_select_device_transitions_or_returns_runtime_error() {
                 SessionState::Streaming { .. }
             ));
         }
-        Err(RairstreamError::AudioCapture(_)) | Err(RairstreamError::Transport(_)) => {
+        Err(RairstreamError::AudioCapture(_) | RairstreamError::Transport(_)) => {
             assert!(controller.state().app_state.selected_device_id.is_none());
             assert_eq!(
                 controller.state().app_state.active_session,
@@ -83,7 +90,7 @@ fn test_select_device_transitions_or_returns_runtime_error() {
 #[test]
 fn test_selecting_unknown_device_returns_configuration_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
-    let mut controller = TrayController::new(coordinator, None);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
 
     controller.refresh_devices();
     let result = controller.select_device("missing-device");

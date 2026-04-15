@@ -58,6 +58,14 @@ fn build_status_label(state: &TrayAppState) -> String {
             let device_name = resolve_device_name(&state.devices, device_id).unwrap_or(device_id);
             format!("Rairstream：正在连接 {device_name}")
         }
+        SessionState::AwaitingPairing { device_id } => {
+            let device_name = resolve_device_name(&state.devices, device_id).unwrap_or(device_id);
+            format!("Rairstream：等待配对 {device_name}")
+        }
+        SessionState::Authenticating { device_id } => {
+            let device_name = resolve_device_name(&state.devices, device_id).unwrap_or(device_id);
+            format!("Rairstream：正在认证 {device_name}")
+        }
         SessionState::Streaming { device_id } => {
             let device_name = resolve_device_name(&state.devices, device_id).unwrap_or(device_id);
             format!("Rairstream：正在串流 {device_name}")
@@ -75,6 +83,12 @@ fn build_device_menu_item(
     let label = match &state.app_state.active_session {
         SessionState::Connecting { device_id } if device_id == &device.id => {
             format!("{prefix}{}（连接中）", device.name)
+        }
+        SessionState::AwaitingPairing { device_id } if device_id == &device.id => {
+            format!("{prefix}{}（等待配对）", device.name)
+        }
+        SessionState::Authenticating { device_id } if device_id == &device.id => {
+            format!("{prefix}{}（认证中）", device.name)
         }
         SessionState::Streaming { device_id } if device_id == &device.id => {
             format!("{prefix}{}（串流中）", device.name)
@@ -100,7 +114,9 @@ fn resolve_device_name<'a>(devices: &'a [SpeakerDevice], device_id: &str) -> Opt
 #[cfg(test)]
 mod tests {
     use super::{TrayAppState, build_tray_menu_model};
-    use crate::app::{AirPlayGeneration, AppState, SessionState, SpeakerDevice};
+    use crate::app::{
+        AirPlayGeneration, AppState, DeviceSupport, ReceiverKind, SessionState, SpeakerDevice,
+    };
 
     fn build_device(id: &str, name: &str) -> SpeakerDevice {
         SpeakerDevice {
@@ -109,6 +125,10 @@ mod tests {
             host: String::from("192.168.1.10"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
+            pairing_id: None,
+            receiver_public_key: None,
+            receiver_kind: ReceiverKind::ClassicRaop,
+            support: DeviceSupport::Supported,
         }
     }
 
@@ -156,6 +176,42 @@ mod tests {
 
         assert_eq!(model.status_label, "Rairstream：正在连接 Kitchen");
         assert_eq!(model.device_items[0].label, "● Kitchen（连接中）");
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_shows_pairing_and_authenticating_status() {
+        let pairing_state = TrayAppState {
+            app_state: AppState {
+                selected_device_id: Some(String::from("kitchen")),
+                active_session: SessionState::AwaitingPairing {
+                    device_id: String::from("kitchen"),
+                },
+            },
+            devices: vec![build_device("kitchen", "Kitchen")],
+        };
+        let authenticating_state = TrayAppState {
+            app_state: AppState {
+                selected_device_id: Some(String::from("kitchen")),
+                active_session: SessionState::Authenticating {
+                    device_id: String::from("kitchen"),
+                },
+            },
+            devices: vec![build_device("kitchen", "Kitchen")],
+        };
+
+        let pairing_model = build_tray_menu_model(&pairing_state);
+        let authenticating_model = build_tray_menu_model(&authenticating_state);
+
+        assert_eq!(pairing_model.status_label, "Rairstream：等待配对 Kitchen");
+        assert_eq!(pairing_model.device_items[0].label, "● Kitchen（等待配对）");
+        assert_eq!(
+            authenticating_model.status_label,
+            "Rairstream：正在认证 Kitchen"
+        );
+        assert_eq!(
+            authenticating_model.device_items[0].label,
+            "● Kitchen（认证中）"
+        );
     }
 
     #[test]

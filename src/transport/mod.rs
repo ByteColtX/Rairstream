@@ -10,12 +10,16 @@ use std::fmt::Write;
 
 use crate::app::SpeakerDevice;
 use crate::audio::AudioFormat;
+use crate::config::ReceiverCredentials;
 use thiserror::Error;
 
 pub use codec::{AudioResampler, CodecDescription};
 pub use packet::{RaopPacketCounters, RaopSyncPacket, RtpAudioPacket};
 pub use rtsp::{RtspHeaders, RtspMethod, RtspRequest, RtspResponse, RtspStatus};
-pub use session::{RaopConnection, RaopSession, RaopSessionState, RaopStreamTransport};
+pub use session::{
+    ModernAirPlayConnection, ModernAirPlaySession, PreparedConnection, PreparedTransportSession,
+    RaopConnection, RaopSession, RaopSessionState, RaopStreamTransport,
+};
 pub use sink::{RaopAudioSink, RaopSinkConfig};
 
 pub const RAOP_SAMPLE_RATE_HZ: u32 = 44_100;
@@ -30,6 +34,7 @@ pub struct SessionDescriptor {
     pub device: SpeakerDevice,
     pub input_format: AudioFormat,
     pub frames_per_packet: usize,
+    pub receiver_credentials: Option<ReceiverCredentials>,
 }
 
 impl SessionDescriptor {
@@ -39,12 +44,24 @@ impl SessionDescriptor {
             device,
             input_format,
             frames_per_packet: RAOP_FRAMES_PER_PACKET,
+            receiver_credentials: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_receiver_credentials(mut self, receiver_credentials: ReceiverCredentials) -> Self {
+        self.receiver_credentials = Some(receiver_credentials);
+        self
     }
 
     #[must_use]
     pub fn client_instance(&self) -> String {
         format_identifier(self.stable_identifier_seed("client-instance"))
+    }
+
+    #[must_use]
+    pub fn client_device_id(&self) -> String {
+        format_device_id(self.stable_identifier_seed("client-device-id"))
     }
 
     #[must_use]
@@ -103,6 +120,18 @@ fn format_identifier(value: u64) -> String {
     identifier
 }
 
+fn format_device_id(value: u64) -> String {
+    let bytes = value.to_be_bytes();
+    let mut identifier = String::with_capacity(17);
+    for (index, byte) in bytes[2..].iter().enumerate() {
+        if index > 0 {
+            identifier.push(':');
+        }
+        let _ = write!(identifier, "{byte:02X}");
+    }
+    identifier
+}
+
 /// `AirPlay` 传输层错误。
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum AirPlayError {
@@ -112,6 +141,12 @@ pub enum AirPlayError {
         "目标设备在会话建立前要求认证或配对（常见于 macOS AirPlay Receiver / Apple TV / 受保护接收端），当前 MVP 尚不支持"
     )]
     AuthenticationRequired,
+    #[error("现代 AirPlay 接收端已响应控制探测，但仍需要先完成配对流程")]
+    PairingRequired,
+    #[error("现代 AirPlay 接收端需要可用认证凭据或既有配对记录")]
+    CredentialsMissing,
+    #[error("现代 AirPlay 认证失败: {message}")]
+    AuthenticationFailed { message: String },
     #[error("RTSP 协议错误: {message}")]
     Protocol { message: String },
     #[error("连接设备失败: {message}")]
@@ -127,7 +162,7 @@ mod tests {
     use super::{
         AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RaopSession, SessionDescriptor,
     };
-    use crate::app::{AirPlayGeneration, SpeakerDevice};
+    use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
 
     fn build_device() -> SpeakerDevice {
@@ -137,6 +172,10 @@ mod tests {
             host: String::from("127.0.0.1"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
+            pairing_id: None,
+            receiver_public_key: None,
+            receiver_kind: ReceiverKind::ClassicRaop,
+            support: DeviceSupport::Supported,
         }
     }
 
@@ -215,5 +254,26 @@ mod tests {
 
         assert!(message.contains("认证或配对"));
         assert!(message.contains("macOS AirPlay Receiver"));
+    }
+
+    #[test]
+    fn modern_auth_errors_expose_distinct_messages() {
+        assert!(
+            AirPlayError::PairingRequired
+                .to_string()
+                .contains("配对流程")
+        );
+        assert!(
+            AirPlayError::CredentialsMissing
+                .to_string()
+                .contains("认证凭据")
+        );
+        assert!(
+            AirPlayError::AuthenticationFailed {
+                message: String::from("forbidden")
+            }
+            .to_string()
+            .contains("forbidden")
+        );
     }
 }

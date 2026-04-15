@@ -1,10 +1,22 @@
 use super::state::{TrayAppState, TrayMenuModel, build_tray_menu_model};
 use crate::app::{AppState, RairstreamError, SessionCoordinator, SessionState, SpeakerDevice};
+use crate::config::{AppConfig, ReceiverCredentials};
 use crate::discovery::DiscoveryService;
+use tracing::{debug, info, warn};
 
 pub trait TraySessionService {
     fn discover(&self) -> Vec<SpeakerDevice>;
     fn prepare_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
+    fn pair_with_pin(
+        &self,
+        device: SpeakerDevice,
+        pin: &str,
+    ) -> Result<ReceiverCredentials, RairstreamError>;
+    fn store_receiver_credentials(
+        &self,
+        device_id: String,
+        receiver_credentials: ReceiverCredentials,
+    ) -> Result<(), RairstreamError>;
     fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
     fn stop_streaming_session(&self) -> Result<AppState, RairstreamError>;
 }
@@ -21,6 +33,22 @@ where
         SessionCoordinator::prepare_session(self, device)
     }
 
+    fn pair_with_pin(
+        &self,
+        device: SpeakerDevice,
+        pin: &str,
+    ) -> Result<ReceiverCredentials, RairstreamError> {
+        SessionCoordinator::pair_with_pin(self, &device, pin)
+    }
+
+    fn store_receiver_credentials(
+        &self,
+        device_id: String,
+        receiver_credentials: ReceiverCredentials,
+    ) -> Result<(), RairstreamError> {
+        SessionCoordinator::store_receiver_credentials(self, device_id, receiver_credentials)
+    }
+
     fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError> {
         SessionCoordinator::start_streaming_session(self, device)
     }
@@ -33,6 +61,7 @@ where
 #[derive(Debug)]
 pub struct TrayController<S> {
     session_service: S,
+    config: AppConfig,
     state: TrayAppState,
 }
 
@@ -41,9 +70,11 @@ where
     S: TraySessionService,
 {
     #[must_use]
-    pub fn new(session_service: S, preferred_device_id: Option<String>) -> Self {
+    pub fn new(session_service: S, config: AppConfig) -> Self {
+        let preferred_device_id = config.preferred_device_id.clone();
         Self {
             session_service,
+            config,
             state: TrayAppState {
                 app_state: AppState {
                     selected_device_id: preferred_device_id,
@@ -65,6 +96,7 @@ where
     }
 
     pub fn refresh_devices(&mut self) -> TrayMenuModel {
+        debug!("托盘请求刷新设备列表");
         self.state.app_state.active_session = SessionState::Discovering;
 
         let devices = self.session_service.discover();
@@ -74,28 +106,26 @@ where
         self.state.app_state.selected_device_id = selected_device_id;
         self.state.app_state.active_session = SessionState::Idle;
 
+        info!(
+            device_count = self.state.devices.len(),
+            "托盘设备列表刷新完成"
+        );
         self.menu_model()
     }
 
     pub fn select_device(&mut self, device_id: &str) -> Result<TrayMenuModel, RairstreamError> {
+        info!(device_id, "托盘请求选择设备");
         if matches!(
             &self.state.app_state.active_session,
             SessionState::Streaming {
                 device_id: active_device_id,
             } if active_device_id == device_id
         ) {
+            info!(device_id, "目标设备已在串流，转为停止串流");
             return self.stop_streaming();
         }
 
-        let device = self
-            .state
-            .devices
-            .iter()
-            .find(|candidate| candidate.id == device_id)
-            .cloned()
-            .ok_or_else(|| RairstreamError::InvalidConfiguration {
-                message: format!("device id {device_id} not found in tray state"),
-            })?;
+        let device = self.find_device(device_id)?;
         let app_state = self.session_service.start_streaming_session(device)?;
 
         self.state.app_state = app_state;
@@ -103,7 +133,40 @@ where
         Ok(self.menu_model())
     }
 
+    pub fn submit_pairing_pin(
+        &mut self,
+        device_id: &str,
+        pin: &str,
+    ) -> Result<TrayMenuModel, RairstreamError> {
+        info!(device_id, "托盘提交首次配对 PIN");
+        let device = self.find_device(device_id)?;
+        let receiver_credentials = self.session_service.pair_with_pin(device.clone(), pin)?;
+        self.session_service
+            .store_receiver_credentials(device.id.clone(), receiver_credentials.clone())?;
+        self.config
+            .upsert_paired_receiver(device.id.clone(), receiver_credentials);
+        self.config.save()?;
+        self.state.app_state.selected_device_id = Some(device.id.clone());
+        self.state.app_state.active_session = SessionState::Authenticating {
+            device_id: device.id.clone(),
+        };
+        let app_state = self.session_service.start_streaming_session(device)?;
+        self.state.app_state = app_state;
+        Ok(self.menu_model())
+    }
+
+    pub fn cancel_pairing(&mut self, device_id: &str) -> Result<TrayMenuModel, RairstreamError> {
+        info!(device_id, "托盘取消首次配对输入");
+        let device = self.find_device(device_id)?;
+        self.state.app_state = AppState {
+            selected_device_id: Some(device.id),
+            active_session: SessionState::Idle,
+        };
+        Ok(self.menu_model())
+    }
+
     pub fn stop_streaming(&mut self) -> Result<TrayMenuModel, RairstreamError> {
+        info!("托盘请求停止串流");
         let mut app_state = self.session_service.stop_streaming_session()?;
         app_state
             .selected_device_id
@@ -124,19 +187,42 @@ where
             })
             .cloned()
     }
+
+    fn find_device(&self, device_id: &str) -> Result<SpeakerDevice, RairstreamError> {
+        self.state
+            .devices
+            .iter()
+            .find(|candidate| candidate.id == device_id)
+            .cloned()
+            .ok_or_else(|| {
+                warn!(device_id, "托盘状态中未找到目标设备");
+                RairstreamError::InvalidConfiguration {
+                    message: format!("device id {device_id} not found in tray state"),
+                }
+            })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{TrayController, TraySessionService};
     use crate::app::{
-        AirPlayGeneration, AppState, RairstreamError, SessionCoordinator, SessionState,
-        SpeakerDevice,
+        AirPlayGeneration, AppState, DeviceSupport, RairstreamError, ReceiverKind,
+        SessionCoordinator, SessionState, SpeakerDevice,
     };
+    use crate::config::{AppConfig, ReceiverAuthFlow, ReceiverCredentials};
     use crate::discovery::StubDiscoveryService;
 
     #[derive(Debug, Clone, Copy)]
     enum StartBehavior {
+        Success,
+        AwaitingPairing,
+        Authenticating,
+        Failure,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum PairBehavior {
         Success,
         Failure,
     }
@@ -145,6 +231,7 @@ mod tests {
     struct StubSessionService {
         devices: Vec<SpeakerDevice>,
         start_behavior: StartBehavior,
+        pair_behavior: PairBehavior,
     }
 
     impl TraySessionService for StubSessionService {
@@ -161,6 +248,36 @@ mod tests {
             })
         }
 
+        fn pair_with_pin(
+            &self,
+            _device: SpeakerDevice,
+            _pin: &str,
+        ) -> Result<ReceiverCredentials, RairstreamError> {
+            match self.pair_behavior {
+                PairBehavior::Success => Ok(ReceiverCredentials {
+                    auth_flow: ReceiverAuthFlow::Modern,
+                    controller_pairing_id: String::from("controller-id"),
+                    controller_ltpk_hex: String::from("11"),
+                    controller_ltsk_hex: String::from("22"),
+                    receiver_pairing_id: String::from("receiver-id"),
+                    receiver_ltpk_hex: String::from("33"),
+                }),
+                PairBehavior::Failure => Err(RairstreamError::Transport(
+                    crate::transport::AirPlayError::AuthenticationFailed {
+                        message: String::from("stub pair failure"),
+                    },
+                )),
+            }
+        }
+
+        fn store_receiver_credentials(
+            &self,
+            _device_id: String,
+            _receiver_credentials: ReceiverCredentials,
+        ) -> Result<(), RairstreamError> {
+            Ok(())
+        }
+
         fn start_streaming_session(
             &self,
             device: SpeakerDevice,
@@ -169,6 +286,18 @@ mod tests {
                 StartBehavior::Success => Ok(AppState {
                     selected_device_id: Some(device.id.clone()),
                     active_session: SessionState::Streaming {
+                        device_id: device.id,
+                    },
+                }),
+                StartBehavior::AwaitingPairing => Ok(AppState {
+                    selected_device_id: Some(device.id.clone()),
+                    active_session: SessionState::AwaitingPairing {
+                        device_id: device.id,
+                    },
+                }),
+                StartBehavior::Authenticating => Ok(AppState {
+                    selected_device_id: Some(device.id.clone()),
+                    active_session: SessionState::Authenticating {
                         device_id: device.id,
                     },
                 }),
@@ -193,6 +322,10 @@ mod tests {
             host: String::from("192.168.1.20"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
+            pairing_id: None,
+            receiver_public_key: None,
+            receiver_kind: ReceiverKind::ClassicRaop,
+            support: DeviceSupport::Supported,
         }
     }
 
@@ -202,8 +335,9 @@ mod tests {
             StubSessionService {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            None,
+            AppConfig::default(),
         );
 
         let model = controller.refresh_devices();
@@ -219,8 +353,12 @@ mod tests {
             StubSessionService {
                 devices: vec![build_device("kitchen", "Kitchen")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            Some(String::from("kitchen")),
+            AppConfig {
+                preferred_device_id: Some(String::from("kitchen")),
+                ..AppConfig::default()
+            },
         );
 
         controller.refresh_devices();
@@ -237,8 +375,12 @@ mod tests {
             StubSessionService {
                 devices: vec![build_device("office", "Office")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            Some(String::from("missing-device")),
+            AppConfig {
+                preferred_device_id: Some(String::from("missing-device")),
+                ..AppConfig::default()
+            },
         );
 
         controller.refresh_devices();
@@ -252,8 +394,9 @@ mod tests {
             StubSessionService {
                 devices: vec![build_device("bedroom", "Bedroom")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            None,
+            AppConfig::default(),
         );
 
         controller.refresh_devices();
@@ -273,13 +416,53 @@ mod tests {
     }
 
     #[test]
+    fn test_select_device_keeps_pairing_related_state() {
+        let mut pairing_controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("bedroom", "Bedroom")],
+                start_behavior: StartBehavior::AwaitingPairing,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+        pairing_controller.refresh_devices();
+        let pairing_model = pairing_controller
+            .select_device("bedroom")
+            .expect("stub pairing selection should succeed");
+        assert_eq!(pairing_model.status_label, "Rairstream：等待配对 Bedroom");
+        assert!(matches!(
+            pairing_controller.state().app_state.active_session,
+            SessionState::AwaitingPairing { .. }
+        ));
+
+        let mut auth_controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Authenticating,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+        auth_controller.refresh_devices();
+        let auth_model = auth_controller
+            .select_device("den")
+            .expect("stub auth selection should succeed");
+        assert_eq!(auth_model.status_label, "Rairstream：正在认证 Den");
+        assert!(matches!(
+            auth_controller.state().app_state.active_session,
+            SessionState::Authenticating { .. }
+        ));
+    }
+
+    #[test]
     fn test_select_device_rejects_missing_device() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("studio", "Studio")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            None,
+            AppConfig::default(),
         );
 
         controller.refresh_devices();
@@ -297,8 +480,9 @@ mod tests {
             StubSessionService {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Failure,
+                pair_behavior: PairBehavior::Failure,
             },
-            None,
+            AppConfig::default(),
         );
 
         controller.refresh_devices();
@@ -313,13 +497,70 @@ mod tests {
     }
 
     #[test]
+    fn test_submit_pairing_pin_retries_same_device_and_enters_streaming() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.state.app_state = AppState {
+            selected_device_id: Some(String::from("den")),
+            active_session: SessionState::AwaitingPairing {
+                device_id: String::from("den"),
+            },
+        };
+
+        let model = controller.submit_pairing_pin("den", "1234").unwrap();
+
+        assert_eq!(model.status_label, "Rairstream：正在串流 Den");
+        assert!(matches!(
+            controller.state().app_state.active_session,
+            SessionState::Streaming { .. }
+        ));
+    }
+
+    #[test]
+    fn test_cancel_pairing_returns_idle_for_same_device() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::AwaitingPairing,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.state.app_state = AppState {
+            selected_device_id: Some(String::from("den")),
+            active_session: SessionState::AwaitingPairing {
+                device_id: String::from("den"),
+            },
+        };
+
+        let model = controller.cancel_pairing("den").unwrap();
+
+        assert_eq!(model.status_label, "Rairstream：已选择 Den");
+        assert_eq!(
+            controller.state().app_state.active_session,
+            SessionState::Idle
+        );
+    }
+
+    #[test]
     fn test_select_streaming_device_stops_session() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
             },
-            None,
+            AppConfig::default(),
         );
 
         controller.refresh_devices();
@@ -336,15 +577,11 @@ mod tests {
     #[test]
     fn test_controller_reuses_session_coordinator_runtime_constraints() {
         let coordinator = SessionCoordinator::new(StubDiscoveryService);
-        let mut controller = TrayController::new(coordinator, None);
+        let mut controller = TrayController::new(coordinator, AppConfig::default());
 
         controller.refresh_devices();
         let result = controller.select_device("stub-speaker");
 
-        if cfg!(target_os = "windows") {
-            assert!(result.is_err());
-        } else {
-            assert!(result.is_err());
-        }
+        assert!(result.is_err());
     }
 }

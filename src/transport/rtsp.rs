@@ -6,6 +6,8 @@ use super::{AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, Session
 /// `RTSP` 请求方法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RtspMethod {
+    Get,
+    Post,
     Options,
     Announce,
     Setup,
@@ -17,6 +19,8 @@ impl RtspMethod {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
             Self::Options => "OPTIONS",
             Self::Announce => "ANNOUNCE",
             Self::Setup => "SETUP",
@@ -61,7 +65,7 @@ pub struct RtspRequest {
     pub method: RtspMethod,
     pub uri: String,
     pub headers: RtspHeaders,
-    pub body: String,
+    pub body: Vec<u8>,
 }
 
 impl RtspRequest {
@@ -71,7 +75,7 @@ impl RtspRequest {
             method,
             uri: uri.into(),
             headers: RtspHeaders::new(),
-            body: String::new(),
+            body: Vec::new(),
         }
     }
 
@@ -82,13 +86,18 @@ impl RtspRequest {
     }
 
     #[must_use]
-    pub fn with_body(mut self, body: impl Into<String>) -> Self {
+    pub fn with_body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = body.into();
         self
     }
 
     #[must_use]
-    pub fn encode(&self) -> String {
+    pub fn body_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.body).ok()
+    }
+
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
         let mut request = format!("{} {} RTSP/1.0\r\n", self.method.as_str(), self.uri);
 
         for (name, value) in self.headers.as_slice() {
@@ -96,8 +105,9 @@ impl RtspRequest {
         }
 
         request.push_str("\r\n");
-        request.push_str(&self.body);
-        request
+        let mut encoded = request.into_bytes();
+        encoded.extend_from_slice(&self.body);
+        encoded
     }
 }
 
@@ -113,7 +123,7 @@ pub struct RtspStatus {
 pub struct RtspResponse {
     pub status: RtspStatus,
     pub headers: RtspHeaders,
-    pub body: String,
+    pub body: Vec<u8>,
 }
 
 impl RtspResponse {
@@ -125,12 +135,16 @@ impl RtspResponse {
                 reason_phrase: String::from("OK"),
             },
             headers: RtspHeaders::new(),
-            body: String::new(),
+            body: Vec::new(),
         }
     }
 
     pub fn parse(raw: &str) -> Result<Self, AirPlayError> {
         let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw, ""));
+        Self::parse_parts(head, body.as_bytes().to_vec())
+    }
+
+    pub fn parse_parts(head: &str, body: Vec<u8>) -> Result<Self, AirPlayError> {
         let mut lines = head.split("\r\n");
         let status_line = lines.next().ok_or_else(|| AirPlayError::Protocol {
             message: String::from("缺少 RTSP 状态行"),
@@ -152,6 +166,10 @@ impl RtspResponse {
 
         let mut headers = RtspHeaders::new();
         for line in lines {
+            if line.is_empty() {
+                continue;
+            }
+
             let Some((name, value)) = line.split_once(':') else {
                 return Err(AirPlayError::Protocol {
                     message: format!("RTSP 头格式无效: {line}"),
@@ -166,8 +184,13 @@ impl RtspResponse {
                 reason_phrase,
             },
             headers,
-            body: String::from(body),
+            body,
         })
+    }
+
+    #[must_use]
+    pub fn body_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.body).ok()
     }
 
     #[must_use]
@@ -185,6 +208,7 @@ pub struct SetupTransport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupReply {
     pub session_id: String,
+    pub session_timeout_secs: Option<u64>,
     pub server_port: u16,
     pub control_port: u16,
     pub timing_port: u16,
@@ -204,6 +228,78 @@ pub fn build_options_request(descriptor: &SessionDescriptor, cseq: u32) -> RtspR
     apply_common_headers(
         descriptor,
         RtspRequest::new(RtspMethod::Options, "*").with_header("CSeq", cseq.to_string()),
+    )
+}
+
+#[must_use]
+pub fn build_info_request(descriptor: &SessionDescriptor, cseq: u32) -> RtspRequest {
+    apply_common_headers(
+        descriptor,
+        RtspRequest::new(RtspMethod::Get, "/info")
+            .with_header("CSeq", cseq.to_string())
+            .with_header("Content-Length", "0"),
+    )
+}
+
+#[must_use]
+pub fn build_pair_setup_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    content_type: &str,
+    body: impl Into<Vec<u8>>,
+) -> RtspRequest {
+    build_post_request(descriptor, cseq, "/pair-setup", content_type, body)
+}
+
+#[must_use]
+pub fn build_pair_pin_start_request(descriptor: &SessionDescriptor, cseq: u32) -> RtspRequest {
+    apply_common_headers(
+        descriptor,
+        RtspRequest::new(RtspMethod::Post, "/pair-pin-start")
+            .with_header("CSeq", cseq.to_string())
+            .with_header("Content-Length", "0"),
+    )
+}
+
+#[must_use]
+pub fn build_pair_setup_pin_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    body: impl Into<Vec<u8>>,
+) -> RtspRequest {
+    build_post_request(
+        descriptor,
+        cseq,
+        "/pair-setup-pin",
+        "application/x-apple-binary-plist",
+        body,
+    )
+}
+
+#[must_use]
+pub fn build_pair_verify_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    content_type: &str,
+    body: impl Into<Vec<u8>>,
+) -> RtspRequest {
+    build_post_request(descriptor, cseq, "/pair-verify", content_type, body)
+}
+
+#[must_use]
+pub fn build_auth_setup_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    body: impl Into<Vec<u8>>,
+) -> RtspRequest {
+    let body = body.into();
+    apply_common_headers(
+        descriptor,
+        RtspRequest::new(RtspMethod::Post, "/auth-setup")
+            .with_header("CSeq", cseq.to_string())
+            .with_header("Content-Type", "application/octet-stream")
+            .with_header("Content-Length", body.len().to_string())
+            .with_body(body),
     )
 }
 
@@ -277,6 +373,20 @@ pub fn build_teardown_request(
     )
 }
 
+#[must_use]
+pub fn build_keepalive_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    session_id: &str,
+) -> RtspRequest {
+    apply_common_headers(
+        descriptor,
+        RtspRequest::new(RtspMethod::Options, "*")
+            .with_header("CSeq", cseq.to_string())
+            .with_header("Session", session_id),
+    )
+}
+
 pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayError> {
     if !response.is_success() {
         return Err(AirPlayError::Protocol {
@@ -284,12 +394,13 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
         });
     }
 
-    let session_id = response
+    let session_header = response
         .headers
         .get("Session")
         .ok_or_else(|| AirPlayError::Protocol {
             message: String::from("SETUP 响应缺少 Session 头"),
-        })?
+        })?;
+    let session_id = session_header
         .split(';')
         .next()
         .unwrap_or_default()
@@ -311,6 +422,7 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
 
     Ok(SetupReply {
         session_id,
+        session_timeout_secs: parse_session_timeout_secs(session_header),
         server_port: parse_transport_port(transport, "server_port")?,
         control_port: parse_transport_port(transport, "control_port")?,
         timing_port: parse_transport_port(transport, "timing_port")?,
@@ -325,7 +437,7 @@ fn build_pcm_sdp(descriptor: &SessionDescriptor, codec: &CodecDescription) -> St
         "v=0\r\no=Rairstream {} 0 IN IP4 {}\r\ns=Rairstream\r\nc=IN IP4 {}\r\nt=0 0\r\nm=audio 0 RTP/AVP 96\r\na=rtpmap:96 {}\r\na=min-latency:{}\r\n",
         descriptor.stream_session_id(),
         sender_ip,
-        descriptor.device.host,
+        sender_ip,
         codec.rtpmap,
         RAOP_STARTUP_LATENCY_FRAMES
     )
@@ -336,6 +448,24 @@ fn resolve_sender_ip(receiver_host: &str, receiver_port: u16) -> Option<String> 
     probe_socket.connect((receiver_host, receiver_port)).ok()?;
     let local_addr = probe_socket.local_addr().ok()?;
     Some(local_addr.ip().to_string())
+}
+
+fn build_post_request(
+    descriptor: &SessionDescriptor,
+    cseq: u32,
+    uri: &str,
+    content_type: &str,
+    body: impl Into<Vec<u8>>,
+) -> RtspRequest {
+    let body = body.into();
+    apply_common_headers(
+        descriptor,
+        RtspRequest::new(RtspMethod::Post, uri)
+            .with_header("CSeq", cseq.to_string())
+            .with_header("Content-Type", content_type)
+            .with_header("Content-Length", body.len().to_string())
+            .with_body(body),
+    )
 }
 
 fn apply_common_headers(descriptor: &SessionDescriptor, request: RtspRequest) -> RtspRequest {
@@ -362,14 +492,26 @@ fn parse_transport_port(transport: &str, field_name: &str) -> Result<u16, AirPla
     })
 }
 
+fn parse_session_timeout_secs(session_header: &str) -> Option<u64> {
+    session_header.split(';').find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        (name.trim().eq_ignore_ascii_case("timeout"))
+            .then(|| value.trim())?
+            .parse::<u64>()
+            .ok()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         RtspHeaders, RtspMethod, RtspRequest, RtspResponse, SetupTransport, build_announce_request,
-        build_options_request, build_record_request, build_session_uri, build_setup_request,
-        build_teardown_request, parse_setup_reply,
+        build_auth_setup_request, build_info_request, build_keepalive_request,
+        build_options_request, build_pair_setup_request, build_pair_verify_request,
+        build_record_request, build_session_uri, build_setup_request, build_teardown_request,
+        parse_setup_reply,
     };
-    use crate::app::{AirPlayGeneration, SpeakerDevice};
+    use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
     use crate::transport::{
         AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, SessionDescriptor,
@@ -383,6 +525,10 @@ mod tests {
                 host: String::from("speaker.local"),
                 port: 7000,
                 generation: AirPlayGeneration::AirPlay1,
+                pairing_id: None,
+                receiver_public_key: None,
+                receiver_kind: ReceiverKind::ClassicRaop,
+                support: DeviceSupport::Supported,
             },
             AudioFormat::default(),
         )
@@ -397,14 +543,14 @@ mod tests {
         assert_eq!(request.method.as_str(), "ANNOUNCE");
         assert_eq!(request.uri, "rtsp://speaker.local/1");
         assert_eq!(request.headers.get("cseq"), Some("1"));
-        assert_eq!(request.body, "v=0");
+        assert_eq!(request.body, b"v=0");
     }
 
     #[test]
     fn request_encode_emits_rtsp_wire_format() {
         let request = RtspRequest::new(RtspMethod::Options, "*").with_header("CSeq", "1");
 
-        assert_eq!(request.encode(), "OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+        assert_eq!(request.encode(), b"OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n");
     }
 
     #[test]
@@ -430,7 +576,7 @@ mod tests {
 
         assert_eq!(response.status.code, 200);
         assert_eq!(response.headers.get("session"), Some("1"));
-        assert_eq!(response.body, "body");
+        assert_eq!(response.body, b"body");
     }
 
     #[test]
@@ -470,9 +616,53 @@ mod tests {
     }
 
     #[test]
+    fn info_request_targets_modern_info_endpoint() {
+        let descriptor = build_descriptor();
+        let request = build_info_request(&descriptor, 12);
+
+        assert_eq!(request.method, RtspMethod::Get);
+        assert_eq!(request.uri, "/info");
+        assert_eq!(request.headers.get("CSeq"), Some("12"));
+        assert_eq!(request.headers.get("Content-Length"), Some("0"));
+    }
+
+    #[test]
+    fn pair_requests_attach_binary_body_and_content_headers() {
+        let descriptor = build_descriptor();
+        let pair_setup =
+            build_pair_setup_request(&descriptor, 13, "application/octet-stream", [1_u8, 2, 3]);
+        let pair_verify =
+            build_pair_verify_request(&descriptor, 14, "application/octet-stream", [4_u8, 5]);
+        let auth_setup = build_auth_setup_request(&descriptor, 15, [6_u8; 33]);
+
+        assert_eq!(pair_setup.method, RtspMethod::Post);
+        assert_eq!(pair_setup.uri, "/pair-setup");
+        assert_eq!(
+            pair_setup.headers.get("Content-Type"),
+            Some("application/octet-stream")
+        );
+        assert_eq!(pair_setup.headers.get("Content-Length"), Some("3"));
+        assert_eq!(pair_setup.body, [1_u8, 2, 3]);
+
+        assert_eq!(pair_verify.method, RtspMethod::Post);
+        assert_eq!(pair_verify.uri, "/pair-verify");
+        assert_eq!(pair_verify.headers.get("Content-Length"), Some("2"));
+        assert_eq!(pair_verify.body, [4_u8, 5]);
+
+        assert_eq!(auth_setup.method, RtspMethod::Post);
+        assert_eq!(auth_setup.uri, "/auth-setup");
+        assert_eq!(auth_setup.headers.get("Content-Length"), Some("33"));
+        assert_eq!(
+            auth_setup.headers.get("Content-Type"),
+            Some("application/octet-stream")
+        );
+    }
+
+    #[test]
     fn announce_request_contains_pcm_sdp() {
         let descriptor = build_descriptor();
         let request = build_announce_request(&descriptor, 8, &CodecDescription::pcm_stereo());
+        let body = request.body_text().unwrap();
 
         assert_eq!(request.method, RtspMethod::Announce);
         assert_eq!(
@@ -491,19 +681,17 @@ mod tests {
             request.headers.get("Active-Remote"),
             Some(descriptor.active_remote().as_str())
         );
-        assert!(request.body.contains(&format!(
+        assert!(body.contains(&format!(
             "o=Rairstream {} 0 IN IP4",
             descriptor.stream_session_id()
         )));
-        assert!(request.body.contains("c=IN IP4 speaker.local"));
-        assert!(!request.body.contains("127.0.0.1"));
-        assert!(request.body.contains("a=rtpmap:96 L16/44100/2"));
-        assert!(
-            request
-                .body
-                .contains(&format!("a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}"))
-        );
-        assert!(request.body.contains("m=audio 0 RTP/AVP 96"));
+        let sender_ip = super::resolve_sender_ip(&descriptor.device.host, descriptor.device.port)
+            .unwrap_or_else(|| String::from("0.0.0.0"));
+        assert!(body.contains(&format!("c=IN IP4 {sender_ip}")));
+        assert!(!body.contains("c=IN IP4 speaker.local"));
+        assert!(body.contains("a=rtpmap:96 L16/44100/2"));
+        assert!(body.contains(&format!("a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}")));
+        assert!(body.contains("m=audio 0 RTP/AVP 96"));
     }
 
     #[test]
@@ -580,9 +768,21 @@ mod tests {
         let reply = parse_setup_reply(&response).unwrap();
 
         assert_eq!(reply.session_id, "deadbeef");
+        assert_eq!(reply.session_timeout_secs, Some(60));
         assert_eq!(reply.server_port, 5000);
         assert_eq!(reply.control_port, 5001);
         assert_eq!(reply.timing_port, 5002);
+    }
+
+    #[test]
+    fn keepalive_request_uses_options_star_and_session() {
+        let descriptor = build_descriptor();
+        let request = build_keepalive_request(&descriptor, 12, "abc");
+
+        assert_eq!(request.method, RtspMethod::Options);
+        assert_eq!(request.uri, "*");
+        assert_eq!(request.headers.get("CSeq"), Some("12"));
+        assert_eq!(request.headers.get("Session"), Some("abc"));
     }
 
     #[test]

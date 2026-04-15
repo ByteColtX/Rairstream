@@ -8,6 +8,7 @@ fn test_default_config_starts_with_auto_reconnect_enabled() {
 
     assert!(config.auto_reconnect);
     assert!(config.preferred_device_id.is_none());
+    assert!(config.paired_receivers.is_empty());
 }
 
 #[test]

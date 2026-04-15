@@ -3,7 +3,7 @@
 mod mdns;
 mod parser;
 
-use crate::app::{AirPlayGeneration, SpeakerDevice};
+use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
 
 pub use mdns::MdnsDiscoveryService;
 
@@ -28,6 +28,12 @@ pub mod testing {
         pub port: u16,
         pub ipv4_addresses: Vec<Ipv4Addr>,
         pub device_id: Option<String>,
+        pub pairing_id: Option<String>,
+        pub model_or_am: Option<String>,
+        pub features: Option<String>,
+        pub flags: Option<String>,
+        pub srcvers: Option<String>,
+        pub receiver_public_key: Option<String>,
     }
 
     #[must_use]
@@ -44,6 +50,12 @@ pub mod testing {
                     port: service.port,
                     ipv4_addresses: service.ipv4_addresses,
                     device_id: service.device_id,
+                    pairing_id: service.pairing_id,
+                    model_or_am: service.model_or_am,
+                    features: service.features,
+                    flags: service.flags,
+                    srcvers: service.srcvers,
+                    receiver_public_key: service.receiver_public_key,
                 })
                 .collect(),
         )
@@ -67,6 +79,10 @@ impl DiscoveryService for StubDiscoveryService {
             host: String::from("127.0.0.1"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
+            pairing_id: None,
+            receiver_public_key: None,
+            receiver_kind: ReceiverKind::ClassicRaop,
+            support: DeviceSupport::Supported,
         }]
     }
 }

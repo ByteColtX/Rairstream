@@ -6,6 +6,7 @@ use super::RAOP_FRAMES_PER_PACKET;
 use super::codec::AudioResampler;
 use super::packet::{RaopSyncPacket, RtpAudioPacket};
 use super::session::RaopStreamTransport;
+use tracing::{debug, trace, warn};
 
 const RAOP_AUDIO_PAYLOAD_TYPE: u8 = 96;
 
@@ -36,6 +37,16 @@ pub struct RaopAudioSink {
 impl RaopAudioSink {
     #[must_use]
     pub fn new(source_format: crate::audio::AudioFormat, transport: RaopStreamTransport) -> Self {
+        debug!(
+            sample_rate_hz = source_format.sample_rate_hz,
+            channels = source_format.channels,
+            bits_per_sample = source_format.bits_per_sample,
+            sample_type = ?source_format.sample_type,
+            audio_target = %transport.audio_target,
+            control_target = %transport.control_target,
+            sync_interval_packets = transport.sink_config.sync_interval_packets,
+            "初始化 RAOP 音频发送端"
+        );
         Self {
             resampler: AudioResampler::new(source_format),
             transport,
@@ -62,21 +73,43 @@ impl RaopAudioSink {
             payload,
         };
         let bytes = packet.encode();
+        let packet_index = self.sent_audio_packets.saturating_add(1);
         if self.sent_audio_packets < 5 {
-            println!(
-                "[rtp] 发送音频包 #{}, seq={}, rtptime={}, payload={} bytes -> {}",
-                self.sent_audio_packets.saturating_add(1),
+            debug!(
+                packet_index,
                 sequence,
-                timestamp,
-                bytes.len(),
-                self.transport.audio_target
+                rtp_timestamp = timestamp,
+                payload_bytes = bytes.len(),
+                target = %self.transport.audio_target,
+                "发送 RTP 音频包"
+            );
+        }
+        if self.first_packet_in_stream
+            || packet_index % self.transport.sink_config.sync_interval_packets == 0
+        {
+            trace!(
+                packet_index,
+                sequence,
+                rtp_timestamp = timestamp,
+                payload_bytes = bytes.len(),
+                target = %self.transport.audio_target,
+                "发送 RTP 音频包摘要"
             );
         }
         self.transport
             .audio_socket
             .send_to(&bytes, self.transport.audio_target)
-            .map_err(|error| AudioCaptureError::RuntimeInitialization {
-                message: error.to_string(),
+            .map_err(|error| {
+                warn!(
+                    sequence,
+                    rtp_timestamp = timestamp,
+                    target = %self.transport.audio_target,
+                    error = %error,
+                    "发送 RTP 音频包失败"
+                );
+                AudioCaptureError::RuntimeInitialization {
+                    message: error.to_string(),
+                }
             })?;
 
         if self.first_packet_in_stream
@@ -101,16 +134,36 @@ impl RaopAudioSink {
         };
         let bytes = packet.encode();
         if self.sent_audio_packets < 5 {
-            println!(
-                "[sync] 发送同步包 seq={}, rtptime={}, next_rtptime={} -> {}",
-                sequence, timestamp, next_rtp_timestamp, self.transport.control_target
+            debug!(
+                sequence,
+                rtp_timestamp = timestamp,
+                next_rtp_timestamp,
+                target = %self.transport.control_target,
+                "发送 RAOP 同步包"
             );
         }
+        trace!(
+            sequence,
+            rtp_timestamp = timestamp,
+            next_rtp_timestamp,
+            packet_index = self.sent_audio_packets.saturating_add(1),
+            target = %self.transport.control_target,
+            "发送 RAOP 同步包"
+        );
         self.transport
             .control_socket
             .send_to(&bytes, self.transport.control_target)
-            .map_err(|error| AudioCaptureError::RuntimeInitialization {
-                message: error.to_string(),
+            .map_err(|error| {
+                warn!(
+                    sequence,
+                    rtp_timestamp = timestamp,
+                    target = %self.transport.control_target,
+                    error = %error,
+                    "发送 RAOP 同步包失败"
+                );
+                AudioCaptureError::RuntimeInitialization {
+                    message: error.to_string(),
+                }
             })?;
         Ok(())
     }
