@@ -42,6 +42,42 @@ fn test_refresh_preserves_preferred_device_when_device_still_exists() {
 }
 
 #[test]
+fn test_initialize_with_auto_reconnect_enabled_attempts_preferred_device() {
+    let coordinator = SessionCoordinator::new(StubDiscoveryService);
+    let mut controller = TrayController::new(
+        coordinator,
+        AppConfig {
+            auto_reconnect: true,
+            preferred_device_id: Some(String::from("stub-speaker")),
+            ..AppConfig::default()
+        },
+    );
+
+    let model = controller.initialize();
+
+    #[cfg(target_os = "windows")]
+    {
+        assert_eq!(model.status_label, "Rairstream：正在串流 Stub Speaker");
+        assert!(matches!(
+            controller.state().app_state.active_session,
+            SessionState::Streaming { .. }
+        ));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        assert_eq!(
+            model.status_label,
+            "Rairstream：功能尚未实现: non-Windows runtime support"
+        );
+        assert_eq!(
+            controller.state().last_error.as_deref(),
+            Some("功能尚未实现: non-Windows runtime support")
+        );
+    }
+}
+
+#[test]
 fn test_select_device_transitions_or_returns_runtime_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, AppConfig::default());

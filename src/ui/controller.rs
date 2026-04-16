@@ -115,6 +115,25 @@ where
         self.menu_model()
     }
 
+    pub fn initialize(&mut self) -> TrayMenuModel {
+        let model = self.refresh_devices();
+        if !self.config.auto_reconnect {
+            return model;
+        }
+
+        let Some(device_id) = self.state.app_state.selected_device_id.clone() else {
+            return model;
+        };
+
+        match self.select_device(&device_id) {
+            Ok(model) => model,
+            Err(error) => {
+                self.handle_error(Some(&device_id), &error);
+                self.menu_model()
+            }
+        }
+    }
+
     pub fn select_device(&mut self, device_id: &str) -> Result<TrayMenuModel, RairstreamError> {
         info!(device_id, "托盘请求选择设备");
         if matches!(
@@ -396,6 +415,54 @@ mod tests {
         assert_eq!(controller.state().devices.len(), 1);
         assert_eq!(model.device_items.len(), 1);
         assert_eq!(model.device_items[0].device_id, "living-room");
+    }
+
+    #[test]
+    fn test_initialize_auto_reconnects_preferred_device() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("living-room", "Living Room")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig {
+                auto_reconnect: true,
+                preferred_device_id: Some(String::from("living-room")),
+                ..AppConfig::default()
+            },
+        );
+
+        let model = controller.initialize();
+
+        assert_eq!(model.status_label, "Rairstream：正在串流 Living Room");
+        assert!(matches!(
+            controller.state().app_state.active_session,
+            SessionState::Streaming { .. }
+        ));
+    }
+
+    #[test]
+    fn test_initialize_skips_auto_reconnect_when_disabled() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("living-room", "Living Room")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+            },
+            AppConfig {
+                auto_reconnect: false,
+                preferred_device_id: Some(String::from("living-room")),
+                ..AppConfig::default()
+            },
+        );
+
+        let model = controller.initialize();
+
+        assert_eq!(model.status_label, "Rairstream：已选择 Living Room");
+        assert_eq!(
+            controller.state().app_state.active_session,
+            SessionState::Idle
+        );
     }
 
     #[test]

@@ -32,7 +32,7 @@ where
     }
 
     let mut controller = TrayController::new(coordinator, config);
-    let initial_model = controller.refresh_devices();
+    let initial_model = controller.initialize();
     let (initial_menu, mut action_map) = build_menu(&initial_model, &controller)?;
     let icon = build_icon()?;
     let mut event_loop_builder = EventLoopBuilder::<MenuEvent>::with_user_event();
