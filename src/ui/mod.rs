@@ -9,7 +9,7 @@ use crate::config::AppConfig;
 use crate::discovery::DiscoveryService;
 use thiserror::Error;
 
-pub use controller::{TrayController, TraySessionService};
+pub use controller::TrayController;
 pub use state::{TrayAppState, TrayDeviceMenuItem, TrayMenuModel, build_tray_menu_model};
 
 #[derive(Debug, Error)]

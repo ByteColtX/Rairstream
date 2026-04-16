@@ -68,22 +68,25 @@ Rairstream 仍在持续开发中，但核心端到端链路已经可用：
 cargo run
 ```
 
-### 运行 smoke 模式
+### 运行 CLI 模式
 
 ```bash
-cargo run -- smoke
-cargo run -- smoke "Living Room"
+cargo run -- cli discover
+cargo run -- cli start --device "Living Room"
 ```
 
 ## CLI
 
 ```bash
-rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
+rairstream [OPTIONS] [tray | cli <discover|start> [--device <DEVICE_FILTER>] [--pin <PIN>]]
 ```
 
 - 默认：启动托盘模式
-- `smoke`：连接到首个发现的接收端
-- `smoke <DEVICE_FILTER>`：按设备名、ID 或主机地址匹配
+- `tray`：显式启动托盘模式
+- `cli discover`：发现并列出可用接收端
+- `cli start`：不依赖托盘，直接以前台模式启动串流
+- `cli start --device <DEVICE_FILTER>`：按设备名、ID 或主机地址匹配
+- `cli start --pin <PIN>`：在需要时以非交互方式提供配对 PIN
 - `-v` / `-vv`：启用 debug / trace 日志
 - `--log-level <error|warn|info|debug|trace>`：显式设置日志级别
 

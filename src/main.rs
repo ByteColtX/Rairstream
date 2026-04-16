@@ -1,57 +1,27 @@
-use std::io;
+use std::io::{self, Write};
+use std::sync::mpsc;
 use std::time::Duration;
 
-use rairstream::app::SessionCoordinator;
-use rairstream::audio::{
-    AudioCaptureError, AudioChunk, AudioFormat, AudioSink, WindowsLoopbackCapture,
-};
+use rairstream::app::{AppController, SessionCoordinator, SessionState, SpeakerDevice};
 use rairstream::config::AppConfig;
 use rairstream::discovery::MdnsDiscoveryService;
-use rairstream::transport::{AirPlayError, RaopAudioSink};
 use rairstream::ui::run_tray_app;
 use tracing::{debug, error, info};
-
-fn format_smoke_prepare_error(
-    device_name: &str,
-    error: rairstream::app::RairstreamError,
-) -> String {
-    match error {
-        rairstream::app::RairstreamError::Transport(transport_error) => {
-            format_smoke_transport_error(device_name, transport_error)
-        }
-        other => other.to_string(),
-    }
-}
-
-fn format_smoke_transport_error(device_name: &str, error: AirPlayError) -> String {
-    match error {
-        AirPlayError::AuthenticationRequired => format!(
-            "{}\n提示：你当前选择的是 {}，它更像需要配对或认证的 AirPlay 接收端（例如 macOS AirPlay Receiver 或 Apple TV）。请在托盘流程中完成配对，或检查本地是否已有可复用的配对记录。",
-            AirPlayError::AuthenticationRequired,
-            device_name
-        ),
-        AirPlayError::PairingRequired => format!(
-            "{}\n提示：{} 需要先完成首次配对，请在托盘流程中输入设备显示的 PIN。",
-            AirPlayError::PairingRequired,
-            device_name
-        ),
-        AirPlayError::CredentialsMissing => format!(
-            "{}\n提示：{} 需要可复用的 AirPlay Receiver 配对记录，但当前配置中没有可用记录，请先完成首次配对。",
-            AirPlayError::CredentialsMissing,
-            device_name
-        ),
-        AirPlayError::AuthenticationFailed { message } => format!(
-            "AirPlay Receiver 认证失败: {message}\n提示：{device_name} 的现有配对记录可能已失效，或设备要求重新配对。"
-        ),
-        other => other.to_string(),
-    }
-}
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LaunchMode {
     Tray,
-    Smoke { device_filter: Option<String> },
+    Cli(CliCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CliCommand {
+    Discover,
+    Start {
+        device_filter: Option<String>,
+        pin: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,9 +46,9 @@ fn main() {
     }
 
     match &cli.mode {
-        LaunchMode::Smoke { device_filter } => {
-            if let Err(error) = run_smoke_mode(device_filter.as_deref()) {
-                error!(error = %error, "烟测模式执行失败");
+        LaunchMode::Cli(command) => {
+            if let Err(error) = run_cli_command(command) {
+                error!(error = %error, "CLI 模式执行失败");
                 std::process::exit(1);
             }
         }
@@ -121,6 +91,7 @@ fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<CliOptions, Strin
                 let value = arg.trim_start_matches("--log-level=").to_string();
                 log_level = Some(parse_log_level(value)?);
             }
+            "--device" | "--pin" => positionals.push(arg),
             _ if arg.starts_with('-') => {
                 return Err(format!("未知参数: {arg}"));
             }
@@ -128,27 +99,74 @@ fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<CliOptions, Strin
         }
     }
 
-    let mode = match positionals.as_slice() {
-        [] => LaunchMode::Tray,
-        [command] if command == "smoke" => LaunchMode::Smoke {
-            device_filter: None,
-        },
-        [command, device_filter] if command == "smoke" => LaunchMode::Smoke {
-            device_filter: Some(device_filter.clone()),
-        },
-        [command, ..] if command == "smoke" => {
-            return Err(String::from("smoke 模式最多只接受一个设备过滤参数"));
-        }
-        [command, ..] => {
-            return Err(format!("未知命令: {command}"));
-        }
-    };
+    let mode = parse_launch_mode(&positionals)?;
 
     Ok(CliOptions {
         mode,
         log_level,
         verbosity,
     })
+}
+
+fn parse_launch_mode(positionals: &[String]) -> Result<LaunchMode, String> {
+    match positionals {
+        [] => Ok(LaunchMode::Tray),
+        [command] if command == "tray" => Ok(LaunchMode::Tray),
+        [command, subcommand] if command == "cli" && subcommand == "discover" => {
+            Ok(LaunchMode::Cli(CliCommand::Discover))
+        }
+        [command, subcommand] if command == "cli" && subcommand == "start" => {
+            Ok(LaunchMode::Cli(CliCommand::Start {
+                device_filter: None,
+                pin: None,
+            }))
+        }
+        [command, subcommand, flag, value]
+            if command == "cli" && subcommand == "start" && flag == "--device" =>
+        {
+            Ok(LaunchMode::Cli(CliCommand::Start {
+                device_filter: Some(value.clone()),
+                pin: None,
+            }))
+        }
+        [command, subcommand, flag, value]
+            if command == "cli" && subcommand == "start" && flag == "--pin" =>
+        {
+            Ok(LaunchMode::Cli(CliCommand::Start {
+                device_filter: None,
+                pin: Some(value.clone()),
+            }))
+        }
+        [
+            command,
+            subcommand,
+            first_flag,
+            first_value,
+            second_flag,
+            second_value,
+        ] if command == "cli" && subcommand == "start" => {
+            let mut device_filter = None;
+            let mut pin = None;
+            for (flag, value) in [(first_flag, first_value), (second_flag, second_value)] {
+                match flag.as_str() {
+                    "--device" => device_filter = Some(value.clone()),
+                    "--pin" => pin = Some(value.clone()),
+                    _ => return Err(format!("未知参数: {flag}")),
+                }
+            }
+            Ok(LaunchMode::Cli(CliCommand::Start { device_filter, pin }))
+        }
+        [command, subcommand, ..] if command == "cli" && subcommand == "discover" => {
+            Err(String::from("cli discover 不接受额外参数"))
+        }
+        [command, subcommand, ..] if command == "cli" && subcommand == "start" => Err(
+            String::from("cli start 仅支持 --device <值> 和 --pin <值>，每个参数最多出现一次"),
+        ),
+        [command, ..] if command == "cli" => {
+            Err(String::from("未知 cli 子命令，可用子命令：discover、start"))
+        }
+        [command, ..] => Err(format!("未知命令: {command}")),
+    }
 }
 
 fn parse_log_level(value: String) -> Result<String, String> {
@@ -224,158 +242,181 @@ fn load_app_config() -> AppConfig {
     }
 }
 
-fn run_smoke_mode(device_filter: Option<&str>) -> Result<(), String> {
-    if !cfg!(target_os = "windows") {
-        return Err(String::from("smoke 模式仅支持在 Windows 上运行"));
-    }
-
-    info!(device_filter = ?device_filter, "开始执行烟测模式");
+fn build_cli_controller() -> AppController<SessionCoordinator<MdnsDiscoveryService>> {
+    let config = load_app_config();
     let coordinator = SessionCoordinator::with_paired_receivers(
         MdnsDiscoveryService::new(Duration::from_secs(3)),
-        AppConfig::default().paired_receivers,
+        config.paired_receivers.clone(),
     );
-    let devices = coordinator.discover();
+    AppController::new(coordinator, config)
+}
+
+fn run_cli_command(command: &CliCommand) -> Result<(), String> {
+    if !cfg!(target_os = "windows") {
+        return Err(String::from("CLI 模式仅支持在 Windows 上运行"));
+    }
+
+    let mut controller = build_cli_controller();
+    controller.refresh_devices();
+
+    match command {
+        CliCommand::Discover => {
+            print_discovered_devices(controller.devices())?;
+            Ok(())
+        }
+        CliCommand::Start { device_filter, pin } => {
+            run_cli_start(&mut controller, device_filter.as_deref(), pin.as_deref())
+        }
+    }
+}
+
+fn print_discovered_devices(devices: &[SpeakerDevice]) -> Result<(), String> {
     if devices.is_empty() {
         return Err(String::from("未发现可用 AirPlay / RAOP 设备"));
     }
 
-    let device = match device_filter {
-        Some(filter) => devices
-            .into_iter()
-            .find(|device| {
-                device.id.contains(filter)
-                    || device.name.contains(filter)
-                    || device.host.contains(filter)
-            })
-            .ok_or_else(|| format!("未找到匹配设备: {filter}"))?,
-        None => devices
-            .into_iter()
-            .next()
-            .ok_or_else(|| String::from("未发现可用 AirPlay / RAOP 设备"))?,
-    };
+    for device in devices {
+        println!(
+            "- {} | id={} | host={} | kind={:?}",
+            device.name, device.id, device.host, device.receiver_kind
+        );
+    }
 
-    info!(
-        device_id = %device.id,
-        device_name = %device.name,
-        device_host = %device.host,
-        endpoint = %device.endpoint(),
-        "准备启动 AirPlay 烟测串流，按回车停止"
-    );
-
-    let format = WindowsLoopbackCapture::preferred_format().map_err(|error| error.to_string())?;
-    info!(
-        sample_rate_hz = format.sample_rate_hz,
-        channels = format.channels,
-        bits_per_sample = format.bits_per_sample,
-        sample_type = ?format.sample_type,
-        "已获取系统回环采集格式"
-    );
-
-    let prepared = coordinator
-        .prepare_transport_session(device.clone())
-        .map_err(|error| format_smoke_prepare_error(&device.name, error))?;
-    let connection = prepared
-        .transport
-        .handshake()
-        .map_err(|error| format_smoke_transport_error(&device.name, error))?;
-    let sink = DiagnosticAudioSink::new(
-        format,
-        RaopAudioSink::new(
-            format,
-            connection
-                .stream_transport()
-                .map_err(|error| error.to_string())?,
-            std::sync::Arc::new(std::sync::Mutex::new(100)),
-        ),
-    );
-    let capture = WindowsLoopbackCapture::start(sink).map_err(|error| error.to_string())?;
-    info!("已启动系统音频捕获，等待音频块并持续发包");
-
-    let mut line = String::new();
-    io::stdin()
-        .read_line(&mut line)
-        .map_err(|error| error.to_string())?;
-
-    capture.stop().map_err(|error| error.to_string())?;
-    connection.teardown().map_err(|error| error.to_string())?;
-    info!("已发送 TEARDOWN，烟测结束");
     Ok(())
 }
 
-#[derive(Debug)]
-struct DiagnosticAudioSink<S> {
-    inner: S,
-    source_format: AudioFormat,
-    seen_chunks: usize,
-}
+fn run_cli_start(
+    controller: &mut AppController<SessionCoordinator<MdnsDiscoveryService>>,
+    device_filter: Option<&str>,
+    pin: Option<&str>,
+) -> Result<(), String> {
+    let device = controller
+        .resolve_target_device(device_filter)
+        .map_err(|error| controller.describe_error(None, &error))?;
+    let device_id = device.id.clone();
+    let device_name = device.name.clone();
 
-impl<S> DiagnosticAudioSink<S> {
-    fn new(source_format: AudioFormat, inner: S) -> Self {
-        Self {
-            inner,
-            source_format,
-            seen_chunks: 0,
+    match controller.select_device(&device_id) {
+        Ok(()) => {}
+        Err(error) => {
+            controller.handle_error(Some(&device_id), &error);
+            return Err(controller.describe_error(Some(&device_id), &error));
         }
+    }
+
+    if matches!(
+        controller.app_state().active_session,
+        SessionState::AwaitingPairing { .. }
+    ) {
+        let pin = match pin {
+            Some(pin) => pin.to_string(),
+            None => prompt_pairing_pin(&device_name)?,
+        };
+        if let Err(error) = controller.submit_pairing_pin(&device_id, &pin) {
+            controller.handle_error(Some(&device_id), &error);
+            return Err(controller.describe_error(Some(&device_id), &error));
+        }
+    }
+
+    match controller.app_state().active_session {
+        SessionState::Streaming { .. } => {
+            info!(device_id = %device_id, device_name = %device_name, "CLI 串流已启动，等待 Ctrl+C 停止");
+            wait_for_ctrl_c().map_err(|error| error.to_string())?;
+            controller
+                .stop_streaming()
+                .map_err(|error| controller.describe_error(Some(&device_id), &error))?;
+            info!(device_id = %device_id, device_name = %device_name, "CLI 串流已停止");
+            Ok(())
+        }
+        SessionState::Authenticating { .. } => Err(format!("{device_name} 正在认证，请稍后重试")),
+        SessionState::AwaitingPairing { .. } => Err(format!("{device_name} 需要先完成首次配对")),
+        _ => Err(format!("{device_name} 未能进入串流状态")),
     }
 }
 
-impl<S> AudioSink for DiagnosticAudioSink<S>
-where
-    S: AudioSink,
-{
-    fn write(&mut self, chunk: AudioChunk) -> Result<(), AudioCaptureError> {
-        self.seen_chunks = self.seen_chunks.saturating_add(1);
-        if self.seen_chunks <= 5 {
-            debug!(
-                chunk_index = self.seen_chunks,
-                frames = chunk.frames,
-                bytes = chunk.bytes.len(),
-                sample_rate_hz = self.source_format.sample_rate_hz,
-                channels = self.source_format.channels,
-                bits_per_sample = self.source_format.bits_per_sample,
-                sample_type = ?self.source_format.sample_type,
-                "收到系统音频块"
-            );
-        }
-
-        self.inner.write(chunk)
+fn prompt_pairing_pin(device_name: &str) -> Result<String, String> {
+    print!("请输入 {device_name} 上显示的 PIN: ");
+    io::stdout()
+        .flush()
+        .map_err(|error| format!("刷新 CLI 提示失败: {error}"))?;
+    let mut pin = String::new();
+    io::stdin()
+        .read_line(&mut pin)
+        .map_err(|error| format!("读取 PIN 失败: {error}"))?;
+    let pin = pin.trim();
+    if pin.is_empty() {
+        return Err(String::from("PIN 不能为空"));
     }
+    Ok(pin.to_string())
+}
+
+fn wait_for_ctrl_c() -> Result<(), io::Error> {
+    let (sender, receiver) = mpsc::channel();
+    ctrlc::set_handler(move || {
+        let _ = sender.send(());
+    })
+    .map_err(io::Error::other)?;
+    receiver.recv().map_err(io::Error::other)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CliOptions, LaunchMode, format_smoke_prepare_error, format_smoke_transport_error,
+        CliCommand, CliOptions, LaunchMode, parse_cli, parse_launch_mode,
         resolve_log_directive_with_env,
     };
-    use rairstream::app::RairstreamError;
-    use rairstream::transport::AirPlayError;
 
     #[test]
-    fn smoke_transport_error_formats_pairing_related_hints() {
-        let pairing = format_smoke_transport_error("Receiver", AirPlayError::PairingRequired);
-        let missing = format_smoke_transport_error("Receiver", AirPlayError::CredentialsMissing);
-        let failed = format_smoke_transport_error(
-            "Receiver",
-            AirPlayError::AuthenticationFailed {
-                message: String::from("forbidden"),
-            },
-        );
+    fn parse_cli_defaults_to_tray_mode() {
+        let cli = parse_cli(Vec::<String>::new()).expect("default parse should succeed");
 
-        assert!(pairing.contains("首次配对"));
-        assert!(missing.contains("没有可用记录"));
-        assert!(failed.contains("forbidden"));
+        assert_eq!(cli.mode, LaunchMode::Tray);
     }
 
     #[test]
-    fn smoke_prepare_error_reuses_transport_mapping() {
-        let formatted = format_smoke_prepare_error(
-            "Receiver",
-            RairstreamError::Transport(AirPlayError::PairingRequired),
-        );
+    fn parse_cli_accepts_cli_discover() {
+        let cli = parse_cli([String::from("cli"), String::from("discover")])
+            .expect("discover parse should succeed");
 
-        assert!(formatted.contains("Receiver"));
-        assert!(formatted.contains("首次配对"));
+        assert_eq!(cli.mode, LaunchMode::Cli(CliCommand::Discover));
+    }
+
+    #[test]
+    fn parse_cli_accepts_cli_start_with_device_and_pin() {
+        let cli = parse_cli([
+            String::from("cli"),
+            String::from("start"),
+            String::from("--device"),
+            String::from("Living Room"),
+            String::from("--pin"),
+            String::from("123456"),
+        ])
+        .expect("start parse should succeed");
+
+        assert_eq!(
+            cli.mode,
+            LaunchMode::Cli(CliCommand::Start {
+                device_filter: Some(String::from("Living Room")),
+                pin: Some(String::from("123456")),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_cli_rejects_unknown_subcommand() {
+        let args = vec![String::from("cli"), String::from("oops")];
+        let error = parse_launch_mode(&args).expect_err("unknown subcommand should fail");
+
+        assert!(error.contains("未知 cli 子命令"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_old_smoke_command() {
+        let args = vec![String::from("smoke")];
+        let error = parse_launch_mode(&args).expect_err("smoke command should fail");
+
+        assert_eq!(error, "未知命令: smoke");
     }
 
     #[test]

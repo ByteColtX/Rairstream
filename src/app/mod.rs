@@ -1,5 +1,6 @@
 //! 应用层：维护共享领域模型与会话编排入口。
 
+mod controller;
 pub mod platform;
 mod session;
 
@@ -9,6 +10,7 @@ use crate::transport::AirPlayError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use controller::{AppController, SessionControlService};
 pub use session::{PreparedSession, SessionCoordinator};
 
 /// 当前应用支持的目标流协议版本。

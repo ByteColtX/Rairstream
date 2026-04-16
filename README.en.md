@@ -68,22 +68,25 @@ Rairstream is under active development, but the core end-to-end path is already 
 cargo run
 ```
 
-### Run smoke mode
+### Run CLI mode
 
 ```bash
-cargo run -- smoke
-cargo run -- smoke "Living Room"
+cargo run -- cli discover
+cargo run -- cli start --device "Living Room"
 ```
 
 ## CLI
 
 ```bash
-rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
+rairstream [OPTIONS] [tray | cli <discover|start> [--device <DEVICE_FILTER>] [--pin <PIN>]]
 ```
 
 - default: start tray mode
-- `smoke`: connect to the first discovered receiver
-- `smoke <DEVICE_FILTER>`: match by device name, ID, or host
+- `tray`: start tray mode explicitly
+- `cli discover`: discover and list available receivers
+- `cli start`: start foreground streaming without the tray
+- `cli start --device <DEVICE_FILTER>`: match by device name, ID, or host
+- `cli start --pin <PIN>`: provide the pairing PIN non-interactively when needed
 - `-v` / `-vv`: enable debug / trace logging
 - `--log-level <error|warn|info|debug|trace>`: set the log level explicitly
 

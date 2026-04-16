@@ -71,7 +71,7 @@ where
 }
 
 fn handle_menu_event(
-    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    controller: &mut TrayController<impl crate::app::SessionControlService>,
     tray_icon: &TrayIcon,
     action_map: &mut HashMap<MenuId, TrayAction>,
     menu_id: &MenuId,
@@ -130,7 +130,7 @@ fn handle_menu_event(
 }
 
 fn handle_select_device(
-    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    controller: &mut TrayController<impl crate::app::SessionControlService>,
     device_id: &str,
 ) -> TrayMenuModel {
     info!(device_id, "托盘菜单触发设备选择");
@@ -156,7 +156,7 @@ fn handle_select_device(
 }
 
 fn handle_pairing_prompt(
-    controller: &mut TrayController<impl super::controller::TraySessionService>,
+    controller: &mut TrayController<impl crate::app::SessionControlService>,
     device_id: &str,
 ) -> TrayMenuModel {
     match prompt_pairing_pin(controller, device_id) {
@@ -191,7 +191,7 @@ fn handle_pairing_prompt(
 
 fn build_menu(
     model: &TrayMenuModel,
-    controller: &TrayController<impl super::controller::TraySessionService>,
+    controller: &TrayController<impl crate::app::SessionControlService>,
 ) -> Result<(Menu, HashMap<MenuId, TrayAction>), TrayUiError> {
     let menu = Menu::new();
     let mut action_map = HashMap::new();
@@ -299,7 +299,7 @@ fn build_menu(
 fn apply_menu_model(
     tray_icon: &TrayIcon,
     model: &TrayMenuModel,
-    controller: &TrayController<impl super::controller::TraySessionService>,
+    controller: &TrayController<impl crate::app::SessionControlService>,
 ) -> Result<HashMap<MenuId, TrayAction>, TrayUiError> {
     let (menu, action_map) = build_menu(model, controller)?;
 
@@ -314,11 +314,11 @@ fn apply_menu_model(
 }
 
 fn prompt_pairing_pin(
-    controller: &TrayController<impl super::controller::TraySessionService>,
+    controller: &TrayController<impl crate::app::SessionControlService>,
     device_id: &str,
 ) -> Result<Option<String>, TrayUiError> {
-    let device_name = controller
-        .state()
+    let state = controller.state();
+    let device_name = state
         .devices
         .iter()
         .find(|device| device.id == device_id)
