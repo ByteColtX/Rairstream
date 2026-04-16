@@ -31,7 +31,7 @@ Rairstream is under active development, but the core end-to-end path is already 
 - Pair AirPlay Receiver devices with a PIN
 - Persist pairing credentials and restore authentication on later connections
 - Start, stop, and switch devices from a system tray app
-- Run a minimal `smoke` mode from the CLI for debugging
+- Run a full CLI mode for receiver discovery, selection, pairing, and streaming without the tray
 - The current sender path outputs fixed `44.1 kHz / 16-bit / 2-channel PCM (L16/44100/2)`; multi-channel input is downmixed to stereo before transmission
 
 ### Current audio profile

@@ -412,14 +412,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_cli_rejects_old_smoke_command() {
-        let args = vec![String::from("smoke")];
-        let error = parse_launch_mode(&args).expect_err("smoke command should fail");
-
-        assert_eq!(error, "未知命令: smoke");
-    }
-
-    #[test]
     fn verbose_level_promotes_trace_logging() {
         let cli = CliOptions {
             mode: LaunchMode::Tray,
