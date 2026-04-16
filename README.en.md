@@ -91,8 +91,8 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 
 ### Audio
 
-- [ ] Add sender-side volume control in the tray UI with a `0–100%` range
-- [ ] Add a mute toggle
+- [x] Add sender-side volume control in the tray UI with a `0–100%` range
+- [x] Add a mute toggle
 - [ ] Evaluate receiver-side volume sync and dB mapping
 - [ ] Keep the current fixed sender profile of `44.1 kHz / 16-bit / 2-channel PCM (L16/44100/2)` while evaluating configurable output profiles
 - [ ] Explicitly cover `44.1 kHz` and `48 kHz` input paths
