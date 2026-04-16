@@ -113,7 +113,7 @@ rairstream [OPTIONS] [tray | cli <discover|start> [--device <DEVICE_FILTER>] [--
 
 - [x] Auto reconnect
 - [x] Remember the last-used device
-- [ ] Launch at startup
+- [x] Launch at startup
 - [x] Start minimized to tray
 - [x] Clearer recovery paths after pairing / authentication failures
 

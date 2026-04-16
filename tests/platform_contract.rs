@@ -1,4 +1,7 @@
-use rairstream::app::platform::{current_platform, ensure_supported_runtime};
+use rairstream::app::platform::{
+    current_platform, ensure_supported_runtime, is_launch_at_startup_enabled,
+    set_launch_at_startup_enabled,
+};
 
 #[test]
 fn test_current_platform_reports_expected_contract() {
@@ -27,5 +30,32 @@ fn test_ensure_supported_runtime_matches_target_platform() {
         }
         Err(error) => panic!("unexpected runtime error: {error}"),
         Ok(()) => panic!("unexpected runtime support on non-Windows target"),
+    }
+}
+
+#[test]
+fn test_launch_at_startup_platform_contract_matches_target_platform() {
+    #[cfg(target_os = "windows")]
+    {
+        is_launch_at_startup_enabled().expect("windows target should expose startup state");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        match is_launch_at_startup_enabled() {
+            Err(rairstream::app::RairstreamError::NotImplemented { feature }) => {
+                assert_eq!(feature, "launch at startup support");
+            }
+            Err(error) => panic!("unexpected startup state error: {error}"),
+            Ok(enabled) => panic!("unexpected startup state on non-Windows target: {enabled}"),
+        }
+
+        match set_launch_at_startup_enabled(true) {
+            Err(rairstream::app::RairstreamError::NotImplemented { feature }) => {
+                assert_eq!(feature, "launch at startup support");
+            }
+            Err(error) => panic!("unexpected startup toggle error: {error}"),
+            Ok(()) => panic!("unexpected startup toggle success on non-Windows target"),
+        }
     }
 }
