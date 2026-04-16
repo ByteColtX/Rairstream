@@ -3526,6 +3526,14 @@ mod tests {
     }
 
     #[test]
+    fn keepalive_interval_caps_fourteen_second_timeout_at_thirteen_seconds() {
+        assert_eq!(
+            super::compute_rtsp_keepalive_interval(Some(14)),
+            Duration::from_secs(13)
+        );
+    }
+
+    #[test]
     fn teardown_sends_keepalive_options_before_teardown() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
