@@ -164,6 +164,15 @@ fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError>
             sample.copy_from_slice(bytes);
             Ok(f64::from(i16::from_le_bytes(sample)) / f64::from(i16::MAX))
         }
+        (AudioSampleType::Int, 24) => {
+            let sample = i32::from_le_bytes([
+                bytes[0],
+                bytes[1],
+                bytes[2],
+                if bytes[2] & 0x80 == 0 { 0 } else { 0xff },
+            ]);
+            Ok(f64::from(sample) / 8_388_607.0)
+        }
         (AudioSampleType::Int, 32) => {
             let mut sample = [0_u8; 4];
             sample.copy_from_slice(bytes);
@@ -341,6 +350,31 @@ mod tests {
     }
 
     #[test]
+    fn downmixes_multichannel_24bit_input_to_stereo() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 4,
+            bits_per_sample: 24,
+            sample_type: AudioSampleType::Int,
+        };
+        let chunk = AudioChunk::new(
+            format,
+            [
+                0x00_u8, 0x00, 0x40, 0x00, 0x00, 0x20, 0x00, 0x00, 0x20, 0x00, 0x00, 0x40,
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+
+        let frames = decode_and_downmix(&chunk).unwrap();
+
+        assert_eq!(frames.len(), 1);
+        assert!((frames[0][0] - 0.375).abs() < 0.001);
+        assert!((frames[0][1] - 0.375).abs() < 0.001);
+    }
+
+    #[test]
     fn resampler_outputs_pcm_packets_for_common_windows_mix_profile() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
@@ -377,6 +411,28 @@ mod tests {
         let packets = resampler.push_chunk(&chunk).unwrap();
 
         assert_eq!(packets.len(), 2);
+    }
+
+    #[test]
+    fn resampler_accepts_24bit_pcm_input() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 2,
+            bits_per_sample: 24,
+            sample_type: AudioSampleType::Int,
+        };
+        let mut resampler = AudioResampler::new(format);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&[0x00, 0x00, 0x40]);
+            bytes.extend_from_slice(&[0x00, 0x00, 0xc0]);
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert!(packets[0].iter().any(|byte| *byte != 0));
     }
 
     #[test]
