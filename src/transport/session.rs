@@ -3213,6 +3213,14 @@ mod tests {
     }
 
     #[test]
+    fn startup_latency_offset_preserves_timestamp_distance_from_baseline() {
+        let baseline = super::apply_startup_latency_offset(0);
+        let advanced = super::apply_startup_latency_offset(12_345);
+
+        assert_eq!(advanced - baseline, 12_345);
+    }
+
+    #[test]
     fn startup_latency_offset_wraps_at_u32_boundary() {
         assert_eq!(
             super::apply_startup_latency_offset(u32::MAX),
