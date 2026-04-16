@@ -366,6 +366,30 @@ mod tests {
     }
 
     #[test]
+    fn downmixes_multichannel_32bit_int_input_to_stereo() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 4,
+            bits_per_sample: 32,
+            sample_type: AudioSampleType::Int,
+        };
+        let chunk = AudioChunk::new(
+            format,
+            [1_610_612_736_i32, 536_870_912, 1_073_741_824, 1_073_741_824]
+                .into_iter()
+                .flat_map(i32::to_le_bytes)
+                .collect(),
+        )
+        .unwrap();
+
+        let frames = decode_and_downmix(&chunk).unwrap();
+
+        assert_eq!(frames.len(), 1);
+        assert!((frames[0][0] - 0.625).abs() < 0.001);
+        assert!((frames[0][1] - 0.375).abs() < 0.001);
+    }
+
+    #[test]
     fn downmixes_multichannel_24bit_input_to_stereo() {
         let format = AudioFormat {
             sample_rate_hz: 44_100,
@@ -492,6 +516,28 @@ mod tests {
         for _ in 0..352 {
             bytes.extend_from_slice(&[0x00, 0x00, 0x40]);
             bytes.extend_from_slice(&[0x00, 0x00, 0xc0]);
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert!(packets[0].iter().any(|byte| *byte != 0));
+    }
+
+    #[test]
+    fn resampler_accepts_32bit_int_pcm_input() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 2,
+            bits_per_sample: 32,
+            sample_type: AudioSampleType::Int,
+        };
+        let mut resampler = AudioResampler::new(format);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&1_073_741_824_i32.to_le_bytes());
+            bytes.extend_from_slice(&(-1_073_741_824_i32).to_le_bytes());
         }
         let chunk = AudioChunk::new(format, bytes).unwrap();
 
