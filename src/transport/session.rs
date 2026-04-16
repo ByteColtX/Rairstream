@@ -3201,6 +3201,17 @@ mod tests {
     }
 
     #[test]
+    fn connect_seeds_timestamp_with_startup_latency_baseline() {
+        let session = RaopSession::connect(&build_descriptor(AudioFormat::default())).unwrap();
+        let (_, timestamp) = session.packet_counters().peek_audio_packet();
+
+        assert_eq!(
+            timestamp.wrapping_sub(RAOP_STARTUP_LATENCY_FRAMES),
+            timestamp - RAOP_STARTUP_LATENCY_FRAMES
+        );
+    }
+
+    #[test]
     fn startup_latency_offset_adds_raop_baseline_to_timestamp_seed() {
         assert_eq!(
             super::apply_startup_latency_offset(0),
