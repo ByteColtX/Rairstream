@@ -28,6 +28,8 @@ where
         TrayAppState {
             app_state: self.controller.app_state().clone(),
             devices: self.controller.devices().to_vec(),
+            auto_reconnect: self.controller.auto_reconnect(),
+            launch_at_startup: self.controller.launch_at_startup(),
             sender_volume_percent: self.controller.sender_volume_percent(),
             sender_muted: self.controller.sender_muted(),
             last_error: self.controller.last_error().map(str::to_string),
@@ -65,6 +67,16 @@ where
 
     pub fn stop_streaming(&mut self) -> Result<TrayMenuModel, RairstreamError> {
         self.controller.stop_streaming()?;
+        Ok(self.menu_model())
+    }
+
+    pub fn toggle_auto_reconnect(&mut self) -> Result<TrayMenuModel, RairstreamError> {
+        self.controller.toggle_auto_reconnect()?;
+        Ok(self.menu_model())
+    }
+
+    pub fn toggle_launch_at_startup(&mut self) -> Result<TrayMenuModel, RairstreamError> {
+        self.controller.toggle_launch_at_startup()?;
         Ok(self.menu_model())
     }
 

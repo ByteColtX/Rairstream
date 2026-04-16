@@ -57,6 +57,8 @@ pub struct ReceiverCredentials {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppConfig {
     pub auto_reconnect: bool,
+    #[serde(default)]
+    pub launch_at_startup: bool,
     pub preferred_device_id: Option<String>,
     #[serde(
         default = "default_sender_volume_percent",
@@ -73,6 +75,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             auto_reconnect: true,
+            launch_at_startup: false,
             preferred_device_id: None,
             sender_volume_percent: DEFAULT_SENDER_VOLUME_PERCENT,
             sender_muted: false,
@@ -153,6 +156,10 @@ impl AppConfig {
 
     pub fn set_preferred_device_id(&mut self, device_id: Option<String>) {
         self.preferred_device_id = device_id;
+    }
+
+    pub fn set_launch_at_startup(&mut self, enabled: bool) {
+        self.launch_at_startup = enabled;
     }
 
     pub fn set_sender_volume_percent(&mut self, percent: u8) {

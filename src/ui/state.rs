@@ -4,6 +4,8 @@ use crate::app::{AppState, SessionState, SpeakerDevice};
 pub struct TrayAppState {
     pub app_state: AppState,
     pub devices: Vec<SpeakerDevice>,
+    pub auto_reconnect: bool,
+    pub launch_at_startup: bool,
     pub sender_volume_percent: u8,
     pub sender_muted: bool,
     pub last_error: Option<String>,
@@ -14,6 +16,8 @@ impl Default for TrayAppState {
         Self {
             app_state: AppState::default(),
             devices: Vec::new(),
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -40,6 +44,8 @@ pub struct TrayVolumeMenuItem {
 pub struct TrayMenuModel {
     pub status_label: String,
     pub refresh_enabled: bool,
+    pub auto_reconnect_label: String,
+    pub launch_at_startup_label: String,
     pub mute_label: String,
     pub muted: bool,
     pub volume_items: Vec<TrayVolumeMenuItem>,
@@ -65,6 +71,8 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
     TrayMenuModel {
         status_label: build_status_label(state),
         refresh_enabled,
+        auto_reconnect_label: build_toggle_label("自动重连", state.auto_reconnect),
+        launch_at_startup_label: build_toggle_label("开机启动", state.launch_at_startup),
         mute_label: if state.sender_muted {
             String::from("取消静音")
         } else {
@@ -74,6 +82,14 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
         volume_items,
         device_items,
         empty_label,
+    }
+}
+
+fn build_toggle_label(title: &str, enabled: bool) -> String {
+    if enabled {
+        format!("{title}：开")
+    } else {
+        format!("{title}：关")
     }
 }
 
@@ -190,6 +206,8 @@ mod tests {
 
         assert_eq!(model.status_label, "Rairstream：空闲");
         assert!(model.refresh_enabled);
+        assert_eq!(model.auto_reconnect_label, "自动重连：开");
+        assert_eq!(model.launch_at_startup_label, "开机启动：关");
         assert_eq!(model.volume_items.len(), 5);
         assert!(model.volume_items[4].selected);
         assert!(model.device_items.is_empty());
@@ -204,6 +222,8 @@ mod tests {
                 active_session: SessionState::Idle,
             },
             devices: vec![build_device("living-room", "Living Room")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -227,6 +247,8 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -248,6 +270,8 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -260,6 +284,8 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -288,6 +314,8 @@ mod tests {
                 active_session: SessionState::Discovering,
             },
             devices: vec![build_device("office", "Office")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: None,
@@ -310,6 +338,8 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 100,
             sender_muted: false,
             last_error: Some(String::from("Kitchen 认证失败，请重新配对后再试")),
@@ -328,6 +358,8 @@ mod tests {
         let state = TrayAppState {
             app_state: AppState::default(),
             devices: Vec::new(),
+            auto_reconnect: true,
+            launch_at_startup: false,
             sender_volume_percent: 50,
             sender_muted: false,
             last_error: None,

@@ -16,6 +16,7 @@ fn build_receiver_credentials() -> ReceiverCredentials {
 fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
     let mut config = AppConfig {
         auto_reconnect: true,
+        launch_at_startup: false,
         preferred_device_id: None,
         sender_volume_percent: 100,
         sender_muted: false,
@@ -39,6 +40,7 @@ fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
         value,
         json!({
             "auto_reconnect": true,
+            "launch_at_startup": false,
             "preferred_device_id": null,
             "sender_volume_percent": 100,
             "sender_muted": false,
@@ -61,6 +63,7 @@ fn test_default_config_contract() {
     let config = AppConfig::default();
 
     assert!(config.auto_reconnect);
+    assert!(!config.launch_at_startup);
     assert!(config.preferred_device_id.is_none());
     assert_eq!(config.sender_volume_percent, 100);
     assert!(config.paired_receivers.is_empty());
@@ -70,6 +73,7 @@ fn test_default_config_contract() {
 fn test_config_serializes_expected_json_shape() {
     let mut config = AppConfig {
         auto_reconnect: false,
+        launch_at_startup: true,
         preferred_device_id: Some(String::from("living-room")),
         sender_volume_percent: 50,
         sender_muted: false,
@@ -85,6 +89,7 @@ fn test_config_serializes_expected_json_shape() {
         value,
         json!({
             "auto_reconnect": false,
+            "launch_at_startup": true,
             "preferred_device_id": "living-room",
             "sender_volume_percent": 50,
             "sender_muted": false,
@@ -105,6 +110,7 @@ fn test_config_serializes_expected_json_shape() {
 fn test_config_deserializes_explicit_values() {
     let config: AppConfig = serde_json::from_value(json!({
         "auto_reconnect": false,
+        "launch_at_startup": true,
         "preferred_device_id": "office-speaker",
         "sender_volume_percent": 25,
         "sender_muted": true,
@@ -121,6 +127,7 @@ fn test_config_deserializes_explicit_values() {
     .expect("config should deserialize from explicit JSON values");
 
     assert!(!config.auto_reconnect);
+    assert!(config.launch_at_startup);
     assert_eq!(
         config.preferred_device_id.as_deref(),
         Some("office-speaker")
@@ -198,6 +205,7 @@ fn test_config_defaults_missing_paired_receivers_to_empty_map() {
     .expect("config should default missing paired_receivers");
 
     assert!(config.paired_receivers.is_empty());
+    assert!(!config.launch_at_startup);
     assert_eq!(config.sender_volume_percent, 100);
 }
 
@@ -213,6 +221,7 @@ fn test_config_load_save_round_trip_preserves_paired_receivers() {
     let path = temp_dir.join("config.json");
     let mut config = AppConfig {
         auto_reconnect: false,
+        launch_at_startup: true,
         preferred_device_id: Some(String::from("living-room")),
         sender_volume_percent: 75,
         sender_muted: false,

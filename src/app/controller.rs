@@ -1,4 +1,4 @@
-use super::{AppState, RairstreamError, SessionCoordinator, SessionState, SpeakerDevice};
+use super::{AppState, RairstreamError, SessionCoordinator, SessionState, SpeakerDevice, platform};
 use crate::config::{AppConfig, ReceiverCredentials};
 use crate::discovery::DiscoveryService;
 use tracing::{debug, info, warn};
@@ -82,6 +82,10 @@ where
         let preferred_device_id = config.preferred_device_id.clone();
         let sender_volume_percent = config.sender_volume_percent;
         let sender_muted = config.sender_muted;
+        let launch_at_startup =
+            platform::is_launch_at_startup_enabled().unwrap_or(config.launch_at_startup);
+        let mut config = config;
+        config.set_launch_at_startup(launch_at_startup);
         Self {
             session_service,
             config,
@@ -104,6 +108,16 @@ where
     #[must_use]
     pub fn devices(&self) -> &[SpeakerDevice] {
         &self.devices
+    }
+
+    #[must_use]
+    pub fn auto_reconnect(&self) -> bool {
+        self.config.auto_reconnect
+    }
+
+    #[must_use]
+    pub fn launch_at_startup(&self) -> bool {
+        self.config.launch_at_startup
     }
 
     #[must_use]
@@ -256,6 +270,22 @@ where
             .set_preferred_device_id(app_state.selected_device_id.clone());
         self.config.save()?;
         self.app_state = app_state;
+        self.last_error = None;
+        Ok(())
+    }
+
+    pub fn toggle_auto_reconnect(&mut self) -> Result<(), RairstreamError> {
+        self.config.auto_reconnect = !self.config.auto_reconnect;
+        self.config.save()?;
+        self.last_error = None;
+        Ok(())
+    }
+
+    pub fn toggle_launch_at_startup(&mut self) -> Result<(), RairstreamError> {
+        let enabled = !self.config.launch_at_startup;
+        platform::set_launch_at_startup_enabled(enabled)?;
+        self.config.set_launch_at_startup(enabled);
+        self.config.save()?;
         self.last_error = None;
         Ok(())
     }

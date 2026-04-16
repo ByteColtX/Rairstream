@@ -124,6 +124,17 @@ fn test_select_device_transitions_or_returns_runtime_error() {
 }
 
 #[test]
+fn test_toggle_auto_reconnect_updates_state_without_active_stream() {
+    let coordinator = SessionCoordinator::new(StubDiscoveryService);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
+
+    let model = controller.toggle_auto_reconnect().unwrap();
+
+    assert!(!controller.state().auto_reconnect);
+    assert_eq!(model.auto_reconnect_label, "自动重连：关");
+}
+
+#[test]
 fn test_set_sender_volume_updates_state_without_active_stream() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, AppConfig::default());

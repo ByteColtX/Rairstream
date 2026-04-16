@@ -15,6 +15,8 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TrayAction {
     RefreshDevices,
+    ToggleAutoReconnect,
+    ToggleLaunchAtStartup,
     SelectDevice(String),
     ToggleSenderMute,
     SetSenderVolume(u8),
@@ -82,6 +84,22 @@ fn handle_menu_event(
             info!("托盘菜单触发刷新设备");
             controller.refresh_devices()
         }
+        Some(TrayAction::ToggleAutoReconnect) => match controller.toggle_auto_reconnect() {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(error = %error, "切换自动重连失败，保留当前菜单状态");
+                controller.handle_error(None, &error);
+                controller.menu_model()
+            }
+        },
+        Some(TrayAction::ToggleLaunchAtStartup) => match controller.toggle_launch_at_startup() {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(error = %error, "切换开机启动失败，保留当前菜单状态");
+                controller.handle_error(None, &error);
+                controller.menu_model()
+            }
+        },
         Some(TrayAction::SelectDevice(device_id)) => handle_select_device(controller, &device_id),
         Some(TrayAction::ToggleSenderMute) => match controller.toggle_sender_mute() {
             Ok(model) => model,
@@ -196,104 +214,117 @@ fn build_menu(
     let menu = Menu::new();
     let mut action_map = HashMap::new();
 
-    let status_item = MenuItem::new(model.status_label.as_str(), false, None);
-    menu.append(&status_item)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
+    append_static_item(&menu, model.status_label.as_str(), false)?;
+    append_separator(&menu)?;
 
-    let status_separator = PredefinedMenuItem::separator();
-    menu.append(&status_separator)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
-
-    let refresh_item = MenuItem::new("刷新设备", model.refresh_enabled, None);
-    action_map.insert(refresh_item.id().clone(), TrayAction::RefreshDevices);
-    menu.append(&refresh_item)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
+    append_action_item(
+        &menu,
+        &mut action_map,
+        "刷新设备",
+        model.refresh_enabled,
+        TrayAction::RefreshDevices,
+    )?;
+    append_action_item(
+        &menu,
+        &mut action_map,
+        model.auto_reconnect_label.as_str(),
+        true,
+        TrayAction::ToggleAutoReconnect,
+    )?;
+    append_action_item(
+        &menu,
+        &mut action_map,
+        model.launch_at_startup_label.as_str(),
+        true,
+        TrayAction::ToggleLaunchAtStartup,
+    )?;
 
     if matches!(
         controller.state().app_state.active_session,
         SessionState::Streaming { .. }
     ) {
-        let stop_item = MenuItem::new("停止串流", true, None);
-        action_map.insert(stop_item.id().clone(), TrayAction::StopStreaming);
-        menu.append(&stop_item)
-            .map_err(|error| TrayUiError::CreateMenu {
-                message: error.to_string(),
-            })?;
+        append_action_item(
+            &menu,
+            &mut action_map,
+            "停止串流",
+            true,
+            TrayAction::StopStreaming,
+        )?;
     }
 
-    let volume_header = MenuItem::new("发送音量", false, None);
-    menu.append(&volume_header)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
-    let mute_item = MenuItem::new(model.mute_label.as_str(), true, None);
-    action_map.insert(mute_item.id().clone(), TrayAction::ToggleSenderMute);
-    menu.append(&mute_item)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
+    append_static_item(&menu, "发送音量", false)?;
+    append_action_item(
+        &menu,
+        &mut action_map,
+        model.mute_label.as_str(),
+        true,
+        TrayAction::ToggleSenderMute,
+    )?;
     for volume_item in &model.volume_items {
-        let menu_item = MenuItem::new(volume_item.label.as_str(), true, None);
-        action_map.insert(
-            menu_item.id().clone(),
+        append_action_item(
+            &menu,
+            &mut action_map,
+            volume_item.label.as_str(),
+            true,
             TrayAction::SetSenderVolume(volume_item.percent),
-        );
-        menu.append(&menu_item)
-            .map_err(|error| TrayUiError::CreateMenu {
-                message: error.to_string(),
-            })?;
+        )?;
     }
 
-    let refresh_separator = PredefinedMenuItem::separator();
-    menu.append(&refresh_separator)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
+    append_separator(&menu)?;
 
     match model.empty_label.as_deref() {
-        Some(empty_label) => {
-            let empty_item = MenuItem::new(empty_label, false, None);
-            menu.append(&empty_item)
-                .map_err(|error| TrayUiError::CreateMenu {
-                    message: error.to_string(),
-                })?;
-        }
+        Some(empty_label) => append_static_item(&menu, empty_label, false)?,
         None => {
             for device_item in &model.device_items {
-                let menu_item =
-                    MenuItem::new(device_item.label.as_str(), device_item.enabled, None);
-                action_map.insert(
-                    menu_item.id().clone(),
+                append_action_item(
+                    &menu,
+                    &mut action_map,
+                    device_item.label.as_str(),
+                    device_item.enabled,
                     TrayAction::SelectDevice(device_item.device_id.clone()),
-                );
-                menu.append(&menu_item)
-                    .map_err(|error| TrayUiError::CreateMenu {
-                        message: error.to_string(),
-                    })?;
+                )?;
             }
         }
     }
 
-    let quit_separator = PredefinedMenuItem::separator();
-    menu.append(&quit_separator)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
-
-    let quit_item = MenuItem::new("退出", true, None);
-    action_map.insert(quit_item.id().clone(), TrayAction::Quit);
-    menu.append(&quit_item)
-        .map_err(|error| TrayUiError::CreateMenu {
-            message: error.to_string(),
-        })?;
+    append_separator(&menu)?;
+    append_action_item(&menu, &mut action_map, "退出", true, TrayAction::Quit)?;
 
     Ok((menu, action_map))
+}
+
+fn append_static_item(menu: &Menu, label: &str, enabled: bool) -> Result<(), TrayUiError> {
+    let item = MenuItem::new(label, enabled, None);
+    menu.append(&item)
+        .map_err(|error| TrayUiError::CreateMenu {
+            message: error.to_string(),
+        })?;
+    Ok(())
+}
+
+fn append_action_item(
+    menu: &Menu,
+    action_map: &mut HashMap<MenuId, TrayAction>,
+    label: &str,
+    enabled: bool,
+    action: TrayAction,
+) -> Result<(), TrayUiError> {
+    let item = MenuItem::new(label, enabled, None);
+    action_map.insert(item.id().clone(), action);
+    menu.append(&item)
+        .map_err(|error| TrayUiError::CreateMenu {
+            message: error.to_string(),
+        })?;
+    Ok(())
+}
+
+fn append_separator(menu: &Menu) -> Result<(), TrayUiError> {
+    let separator = PredefinedMenuItem::separator();
+    menu.append(&separator)
+        .map_err(|error| TrayUiError::CreateMenu {
+            message: error.to_string(),
+        })?;
+    Ok(())
 }
 
 fn apply_menu_model(
