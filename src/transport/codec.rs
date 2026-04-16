@@ -350,6 +350,22 @@ mod tests {
     }
 
     #[test]
+    fn downmixes_single_channel_input_to_dual_mono() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 1,
+            bits_per_sample: 16,
+            sample_type: AudioSampleType::Int,
+        };
+        let chunk = AudioChunk::new(format, 10_000_i16.to_le_bytes().into()).unwrap();
+
+        let frames = decode_and_downmix(&chunk).unwrap();
+
+        assert_eq!(frames.len(), 1);
+        assert!((frames[0][0] - frames[0][1]).abs() < 0.000_001);
+    }
+
+    #[test]
     fn downmixes_multichannel_24bit_input_to_stereo() {
         let format = AudioFormat {
             sample_rate_hz: 44_100,
@@ -372,6 +388,56 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert!((frames[0][0] - 0.375).abs() < 0.001);
         assert!((frames[0][1] - 0.375).abs() < 0.001);
+    }
+
+    #[test]
+    fn downmixes_six_channel_input_to_stereo_by_odd_even_groups() {
+        let format = AudioFormat {
+            sample_rate_hz: 48_000,
+            channels: 6,
+            bits_per_sample: 16,
+            sample_type: AudioSampleType::Int,
+        };
+        let chunk = AudioChunk::new(
+            format,
+            [30_000_i16, 6_000, 24_000, 12_000, 18_000, 18_000]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect(),
+        )
+        .unwrap();
+
+        let frames = decode_and_downmix(&chunk).unwrap();
+
+        assert_eq!(frames.len(), 1);
+        assert!((frames[0][0] - 0.7324).abs() < 0.001);
+        assert!((frames[0][1] - 0.3662).abs() < 0.001);
+    }
+
+    #[test]
+    fn downmixes_eight_channel_input_to_stereo_by_odd_even_groups() {
+        let format = AudioFormat {
+            sample_rate_hz: 48_000,
+            channels: 8,
+            bits_per_sample: 16,
+            sample_type: AudioSampleType::Int,
+        };
+        let chunk = AudioChunk::new(
+            format,
+            [
+                32_000_i16, 4_000, 24_000, 8_000, 16_000, 12_000, 8_000, 16_000,
+            ]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect(),
+        )
+        .unwrap();
+
+        let frames = decode_and_downmix(&chunk).unwrap();
+
+        assert_eq!(frames.len(), 1);
+        assert!((frames[0][0] - 0.6104).abs() < 0.001);
+        assert!((frames[0][1] - 0.3052).abs() < 0.001);
     }
 
     #[test]
