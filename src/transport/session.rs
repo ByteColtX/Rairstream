@@ -3232,6 +3232,14 @@ mod tests {
     }
 
     #[test]
+    fn startup_latency_offset_reaches_u32_max_at_exact_rollover_threshold() {
+        assert_eq!(
+            super::apply_startup_latency_offset(u32::MAX - RAOP_STARTUP_LATENCY_FRAMES),
+            u32::MAX
+        );
+    }
+
+    #[test]
     fn startup_latency_offset_wraps_at_u32_boundary() {
         assert_eq!(
             super::apply_startup_latency_offset(u32::MAX),
