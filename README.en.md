@@ -95,9 +95,9 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 - [x] Add a mute toggle
 - [ ] Evaluate receiver-side volume sync and dB mapping
 - [ ] Keep the current fixed sender profile of `44.1 kHz / 16-bit / 2-channel PCM (L16/44100/2)` while evaluating configurable output profiles
-- [ ] Explicitly cover `44.1 kHz` and `48 kHz` input paths
-- [ ] Explicitly cover `16-bit / 24-bit / 32-bit` input format conversion
-- [ ] Define handling for `1 / 2 / 6 / 8` channel input layouts (multi-channel input is currently downmixed to `2` channels)
+- [x] Explicitly cover `44.1 kHz` and `48 kHz` input paths
+- [x] Explicitly cover `16-bit / 24-bit / 32-bit` input format conversion
+- [x] Define handling for `1 / 2 / 6 / 8` channel input layouts (multi-channel input is currently downmixed to `2` channels)
 - [ ] Evaluate reducing startup latency from the current `11025` frames (about `250 ms @ 44.1 kHz`)
 - [ ] Continue improving buffering, keepalive behavior, and long-run stability
 
