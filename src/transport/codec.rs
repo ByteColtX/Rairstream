@@ -660,6 +660,25 @@ mod tests {
     }
 
     #[test]
+    fn resampler_caps_sender_volume_above_hundred_percent() {
+        let format = AudioFormat::default();
+        let mut full_resampler = AudioResampler::new(format);
+        let mut capped_resampler = AudioResampler::new(format);
+        capped_resampler.set_sender_volume_percent(150);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&10_000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-10_000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let full_packets = full_resampler.push_chunk(&chunk).unwrap();
+        let capped_packets = capped_resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(capped_packets, full_packets);
+    }
+
+    #[test]
     fn encode_pcm_packet_writes_big_endian_stereo_samples() {
         let bytes = encode_pcm_packet(&[[0.5, -0.5]]);
 
