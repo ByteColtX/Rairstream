@@ -64,6 +64,8 @@ pub struct AppConfig {
     )]
     pub sender_volume_percent: u8,
     #[serde(default)]
+    pub sender_muted: bool,
+    #[serde(default)]
     pub paired_receivers: HashMap<String, ReceiverCredentials>,
 }
 
@@ -73,6 +75,7 @@ impl Default for AppConfig {
             auto_reconnect: true,
             preferred_device_id: None,
             sender_volume_percent: DEFAULT_SENDER_VOLUME_PERCENT,
+            sender_muted: false,
             paired_receivers: HashMap::new(),
         }
     }
@@ -150,6 +153,10 @@ impl AppConfig {
 
     pub fn set_sender_volume_percent(&mut self, percent: u8) {
         self.sender_volume_percent = clamp_sender_volume_percent(percent);
+    }
+
+    pub fn set_sender_muted(&mut self, muted: bool) {
+        self.sender_muted = muted;
     }
 }
 

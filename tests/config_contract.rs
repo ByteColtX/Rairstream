@@ -18,6 +18,7 @@ fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
         auto_reconnect: true,
         preferred_device_id: None,
         sender_volume_percent: 100,
+        sender_muted: false,
         paired_receivers: std::collections::HashMap::new(),
     };
     config.paired_receivers.insert(
@@ -40,6 +41,7 @@ fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
             "auto_reconnect": true,
             "preferred_device_id": null,
             "sender_volume_percent": 100,
+            "sender_muted": false,
             "paired_receivers": {
                 "receiver-legacy": {
                     "auth_flow": "legacy_pin",
@@ -70,6 +72,7 @@ fn test_config_serializes_expected_json_shape() {
         auto_reconnect: false,
         preferred_device_id: Some(String::from("living-room")),
         sender_volume_percent: 50,
+        sender_muted: false,
         paired_receivers: std::collections::HashMap::new(),
     };
     config
@@ -84,6 +87,7 @@ fn test_config_serializes_expected_json_shape() {
             "auto_reconnect": false,
             "preferred_device_id": "living-room",
             "sender_volume_percent": 50,
+            "sender_muted": false,
             "paired_receivers": {
                 "receiver-1": {
                     "controller_pairing_id": "controller-id",
@@ -103,6 +107,7 @@ fn test_config_deserializes_explicit_values() {
         "auto_reconnect": false,
         "preferred_device_id": "office-speaker",
         "sender_volume_percent": 25,
+        "sender_muted": true,
         "paired_receivers": {
             "receiver-1": {
                 "controller_pairing_id": "controller-id",
@@ -210,6 +215,7 @@ fn test_config_load_save_round_trip_preserves_paired_receivers() {
         auto_reconnect: false,
         preferred_device_id: Some(String::from("living-room")),
         sender_volume_percent: 75,
+        sender_muted: false,
         paired_receivers: std::collections::HashMap::new(),
     };
     config.upsert_paired_receiver("receiver-1", build_receiver_credentials());

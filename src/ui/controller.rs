@@ -78,6 +78,7 @@ where
     pub fn new(session_service: S, config: AppConfig) -> Self {
         let preferred_device_id = config.preferred_device_id.clone();
         let sender_volume_percent = config.sender_volume_percent;
+        let sender_muted = config.sender_muted;
         Self {
             session_service,
             config,
@@ -88,6 +89,7 @@ where
                 },
                 devices: Vec::new(),
                 sender_volume_percent,
+                sender_muted,
                 last_error: None,
             },
         }
@@ -225,11 +227,36 @@ where
             SessionState::Streaming { .. }
         ) {
             self.session_service
-                .set_sender_volume_percent(self.state.sender_volume_percent)?;
+                .set_sender_volume_percent(self.effective_sender_volume_percent())?;
         }
 
         self.state.last_error = None;
         Ok(self.menu_model())
+    }
+
+    pub fn toggle_sender_mute(&mut self) -> Result<TrayMenuModel, RairstreamError> {
+        self.config.set_sender_muted(!self.config.sender_muted);
+        self.config.save()?;
+        self.state.sender_muted = self.config.sender_muted;
+
+        if matches!(
+            self.state.app_state.active_session,
+            SessionState::Streaming { .. }
+        ) {
+            self.session_service
+                .set_sender_volume_percent(self.effective_sender_volume_percent())?;
+        }
+
+        self.state.last_error = None;
+        Ok(self.menu_model())
+    }
+
+    fn effective_sender_volume_percent(&self) -> u8 {
+        if self.state.sender_muted {
+            0
+        } else {
+            self.state.sender_volume_percent
+        }
     }
 
     fn retain_selected_device_id(&self, devices: &[SpeakerDevice]) -> Option<String> {
@@ -787,6 +814,49 @@ mod tests {
 
         assert_eq!(controller.state().sender_volume_percent, 75);
         assert_eq!(*last_sender_volume_percent.lock().unwrap(), Some(75));
+    }
+
+    #[test]
+    fn test_toggle_sender_mute_updates_state_when_idle() {
+        let last_sender_volume_percent = Arc::new(Mutex::new(None));
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::clone(&last_sender_volume_percent),
+            },
+            AppConfig::default(),
+        );
+
+        let model = controller.toggle_sender_mute().unwrap();
+
+        assert!(controller.state().sender_muted);
+        assert!(controller.config.sender_muted);
+        assert!(model.muted);
+        assert_eq!(model.mute_label, "取消静音");
+        assert_eq!(*last_sender_volume_percent.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn test_toggle_sender_mute_updates_active_stream_to_silence() {
+        let last_sender_volume_percent = Arc::new(Mutex::new(None));
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::clone(&last_sender_volume_percent),
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.select_device("den").unwrap();
+        controller.toggle_sender_mute().unwrap();
+
+        assert!(controller.state().sender_muted);
+        assert_eq!(*last_sender_volume_percent.lock().unwrap(), Some(0));
     }
 
     #[test]

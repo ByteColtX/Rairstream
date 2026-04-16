@@ -5,6 +5,7 @@ pub struct TrayAppState {
     pub app_state: AppState,
     pub devices: Vec<SpeakerDevice>,
     pub sender_volume_percent: u8,
+    pub sender_muted: bool,
     pub last_error: Option<String>,
 }
 
@@ -14,6 +15,7 @@ impl Default for TrayAppState {
             app_state: AppState::default(),
             devices: Vec::new(),
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         }
     }
@@ -38,6 +40,8 @@ pub struct TrayVolumeMenuItem {
 pub struct TrayMenuModel {
     pub status_label: String,
     pub refresh_enabled: bool,
+    pub mute_label: String,
+    pub muted: bool,
     pub volume_items: Vec<TrayVolumeMenuItem>,
     pub device_items: Vec<TrayDeviceMenuItem>,
     pub empty_label: Option<String>,
@@ -61,6 +65,12 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
     TrayMenuModel {
         status_label: build_status_label(state),
         refresh_enabled,
+        mute_label: if state.sender_muted {
+            String::from("取消静音")
+        } else {
+            String::from("静音")
+        },
+        muted: state.sender_muted,
         volume_items,
         device_items,
         empty_label,
@@ -195,6 +205,7 @@ mod tests {
             },
             devices: vec![build_device("living-room", "Living Room")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         };
 
@@ -217,6 +228,7 @@ mod tests {
             },
             devices: vec![build_device("kitchen", "Kitchen")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         };
 
@@ -237,6 +249,7 @@ mod tests {
             },
             devices: vec![build_device("kitchen", "Kitchen")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         };
         let authenticating_state = TrayAppState {
@@ -248,6 +261,7 @@ mod tests {
             },
             devices: vec![build_device("kitchen", "Kitchen")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         };
 
@@ -275,6 +289,7 @@ mod tests {
             },
             devices: vec![build_device("office", "Office")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: None,
         };
 
@@ -296,6 +311,7 @@ mod tests {
             },
             devices: vec![build_device("kitchen", "Kitchen")],
             sender_volume_percent: 100,
+            sender_muted: false,
             last_error: Some(String::from("Kitchen 认证失败，请重新配对后再试")),
         };
 
@@ -313,6 +329,7 @@ mod tests {
             app_state: AppState::default(),
             devices: Vec::new(),
             sender_volume_percent: 50,
+            sender_muted: false,
             last_error: None,
         };
 

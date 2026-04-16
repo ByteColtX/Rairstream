@@ -38,6 +38,7 @@ fn test_menu_model_for_idle_selection_shows_selected_device_label() {
         },
         devices: vec![build_device("living-room", "Living Room")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
 
@@ -59,6 +60,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
         },
         devices: vec![build_device("bedroom", "Bedroom")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
     let pairing_state = TrayAppState {
@@ -70,6 +72,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
         },
         devices: vec![build_device("bedroom", "Bedroom")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
     let authenticating_state = TrayAppState {
@@ -81,6 +84,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
         },
         devices: vec![build_device("bedroom", "Bedroom")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
     let streaming_state = TrayAppState {
@@ -92,6 +96,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
         },
         devices: vec![build_device("bedroom", "Bedroom")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
 
@@ -129,6 +134,7 @@ fn test_menu_model_marks_selected_volume_preset() {
         app_state: AppState::default(),
         devices: Vec::new(),
         sender_volume_percent: 50,
+        sender_muted: false,
         last_error: None,
     };
 
@@ -140,6 +146,22 @@ fn test_menu_model_marks_selected_volume_preset() {
 }
 
 #[test]
+fn test_menu_model_for_muted_state_shows_unmute_label() {
+    let state = TrayAppState {
+        app_state: AppState::default(),
+        devices: Vec::new(),
+        sender_volume_percent: 50,
+        sender_muted: true,
+        last_error: None,
+    };
+
+    let model = build_tray_menu_model(&state);
+
+    assert!(model.muted);
+    assert_eq!(model.mute_label, "取消静音");
+}
+
+#[test]
 fn test_menu_model_for_discovering_disables_refresh_and_device_actions() {
     let state = TrayAppState {
         app_state: AppState {
@@ -148,6 +170,7 @@ fn test_menu_model_for_discovering_disables_refresh_and_device_actions() {
         },
         devices: vec![build_device("office", "Office")],
         sender_volume_percent: 100,
+        sender_muted: false,
         last_error: None,
     };
 

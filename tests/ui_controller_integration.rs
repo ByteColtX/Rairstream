@@ -136,6 +136,18 @@ fn test_set_sender_volume_updates_state_without_active_stream() {
 }
 
 #[test]
+fn test_toggle_sender_mute_updates_state_without_active_stream() {
+    let coordinator = SessionCoordinator::new(StubDiscoveryService);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
+
+    let model = controller.toggle_sender_mute().unwrap();
+
+    assert!(controller.state().sender_muted);
+    assert!(model.muted);
+    assert_eq!(model.mute_label, "取消静音");
+}
+
+#[test]
 fn test_selecting_unknown_device_returns_configuration_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, AppConfig::default());

@@ -16,6 +16,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 enum TrayAction {
     RefreshDevices,
     SelectDevice(String),
+    ToggleSenderMute,
     SetSenderVolume(u8),
     StopStreaming,
     Quit,
@@ -82,6 +83,14 @@ fn handle_menu_event(
             controller.refresh_devices()
         }
         Some(TrayAction::SelectDevice(device_id)) => handle_select_device(controller, &device_id),
+        Some(TrayAction::ToggleSenderMute) => match controller.toggle_sender_mute() {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(error = %error, "切换发送端静音失败，保留当前菜单状态");
+                controller.handle_error(None, &error);
+                controller.menu_model()
+            }
+        },
         Some(TrayAction::SetSenderVolume(percent)) => match controller.set_sender_volume(percent) {
             Ok(model) => model,
             Err(error) => {
@@ -220,6 +229,12 @@ fn build_menu(
 
     let volume_header = MenuItem::new("发送音量", false, None);
     menu.append(&volume_header)
+        .map_err(|error| TrayUiError::CreateMenu {
+            message: error.to_string(),
+        })?;
+    let mute_item = MenuItem::new(model.mute_label.as_str(), true, None);
+    action_map.insert(mute_item.id().clone(), TrayAction::ToggleSenderMute);
+    menu.append(&mute_item)
         .map_err(|error| TrayUiError::CreateMenu {
             message: error.to_string(),
         })?;
