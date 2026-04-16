@@ -3545,6 +3545,14 @@ mod tests {
     }
 
     #[test]
+    fn keepalive_interval_keeps_fifteen_seconds_for_twenty_nine_second_timeout() {
+        assert_eq!(
+            super::compute_rtsp_keepalive_interval(Some(29)),
+            Duration::from_secs(15)
+        );
+    }
+
+    #[test]
     fn keepalive_interval_caps_sixteen_second_timeout_at_fifteen_seconds() {
         assert_eq!(
             super::compute_rtsp_keepalive_interval(Some(16)),
