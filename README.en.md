@@ -108,8 +108,8 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 
 ### Desktop UX
 
-- [ ] Auto reconnect
-- [ ] Remember the last-used device
+- [x] Auto reconnect
+- [x] Remember the last-used device
 - [ ] Launch at startup
 - [ ] Start minimized to tray
 - [ ] Clearer recovery paths after pairing / authentication failures
