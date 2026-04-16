@@ -10,7 +10,7 @@ use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tracing::{error, info, warn};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TrayAction {
@@ -23,6 +23,12 @@ enum TrayAction {
     StopStreaming,
     ShowAbout,
     Quit,
+}
+
+#[derive(Debug)]
+enum UserEvent {
+    Menu(MenuEvent),
+    Tray(TrayIconEvent),
 }
 
 struct TrayMenuState {
@@ -68,12 +74,17 @@ where
     let initial_model = controller.initialize();
     let mut menu_state = TrayMenuState::new(&initial_model, &controller)?;
     let icon = build_icon()?;
-    let mut event_loop_builder = EventLoopBuilder::<MenuEvent>::with_user_event();
+
+    let mut event_loop_builder = EventLoopBuilder::<UserEvent>::with_user_event();
     let event_loop = event_loop_builder.build();
     let proxy = event_loop.create_proxy();
+    let menu_proxy = proxy.clone();
 
     MenuEvent::set_event_handler(Some(move |event| {
-        let _ = proxy.send_event(event);
+        let _ = menu_proxy.send_event(UserEvent::Menu(event));
+    }));
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        let _ = proxy.send_event(UserEvent::Tray(event));
     }));
 
     let tray_icon = TrayIconBuilder::new()
@@ -89,14 +100,32 @@ where
     event_loop.run(move |event, _window_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        if let Event::UserEvent(menu_event) = event {
-            handle_menu_event(
-                &mut controller,
-                &tray_icon,
-                &mut menu_state,
-                &menu_event.id,
-                control_flow,
-            );
+        if let Event::UserEvent(user_event) = event {
+            match user_event {
+                UserEvent::Menu(menu_event) => {
+                    handle_menu_event(
+                        &mut controller,
+                        &tray_icon,
+                        &mut menu_state,
+                        &menu_event.id,
+                        control_flow,
+                    );
+                }
+                UserEvent::Tray(TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Down,
+                    ..
+                }) => {
+                    let model = controller.sync_runtime_state();
+                    if let Err(error) =
+                        sync_menu_model(&tray_icon, &mut menu_state, &model, &controller)
+                    {
+                        error!(error = %error, "打开托盘时同步菜单状态失败，准备退出事件循环");
+                        *control_flow = ControlFlow::ExitWithCode(1);
+                    }
+                }
+                UserEvent::Tray(_) => {}
+            }
         }
     })
 }

@@ -18,6 +18,10 @@ pub trait SessionControlService {
     ) -> Result<(), RairstreamError>;
     fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
     fn stop_streaming_session(&self) -> Result<AppState, RairstreamError>;
+    fn reconcile_app_state(
+        &self,
+        selected_device_id: Option<String>,
+    ) -> Result<AppState, RairstreamError>;
     fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError>;
 }
 
@@ -55,6 +59,13 @@ where
 
     fn stop_streaming_session(&self) -> Result<AppState, RairstreamError> {
         SessionCoordinator::stop_streaming_session(self)
+    }
+
+    fn reconcile_app_state(
+        &self,
+        selected_device_id: Option<String>,
+    ) -> Result<AppState, RairstreamError> {
+        SessionCoordinator::reconcile_app_state(self, selected_device_id)
     }
 
     fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
@@ -148,8 +159,16 @@ where
         let selected_device_id = self.retain_selected_device_id(&devices);
 
         self.devices = devices;
-        self.app_state.selected_device_id = selected_device_id;
-        self.app_state.active_session = SessionState::Idle;
+        self.app_state = self
+            .session_service
+            .reconcile_app_state(selected_device_id)
+            .unwrap_or_else(|error| {
+                warn!(error = %error, "刷新设备后对账运行态失败，回退到 Idle");
+                AppState {
+                    selected_device_id: self.retain_selected_device_id(&self.devices),
+                    active_session: SessionState::Idle,
+                }
+            });
         self.last_error = None;
 
         info!(device_count = self.devices.len(), "设备列表刷新完成");
@@ -157,6 +176,12 @@ where
 
     pub fn initialize(&mut self) {
         self.refresh_devices();
+        if matches!(
+            self.app_state.active_session,
+            SessionState::Streaming { .. }
+        ) {
+            return;
+        }
         if !self.config.auto_reconnect {
             return;
         }
@@ -574,6 +599,28 @@ mod tests {
             })
         }
 
+        fn reconcile_app_state(
+            &self,
+            selected_device_id: Option<String>,
+        ) -> Result<AppState, RairstreamError> {
+            Ok(
+                match *self.start_behavior.lock().expect("lock start behavior") {
+                    StartBehavior::Success => AppState {
+                        selected_device_id,
+                        active_session: SessionState::Streaming {
+                            device_id: String::from("living-room"),
+                        },
+                    },
+                    StartBehavior::AwaitingPairing
+                    | StartBehavior::Authenticating
+                    | StartBehavior::AuthFailure => AppState {
+                        selected_device_id,
+                        active_session: SessionState::Idle,
+                    },
+                },
+            )
+        }
+
         fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
             *self
                 .last_sender_volume_percent
@@ -598,6 +645,61 @@ mod tests {
     }
 
     #[test]
+    fn refresh_devices_selects_preferred_device_when_available() {
+        let mut controller = AppController::new(
+            StubSessionService {
+                devices: vec![
+                    build_device("living-room", "Living Room", "192.168.1.10"),
+                    build_device("kitchen", "Kitchen", "192.168.1.11"),
+                ],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
+                stored_credentials: Arc::new(Mutex::new(Vec::new())),
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig {
+                preferred_device_id: Some(String::from("kitchen")),
+                ..AppConfig::default()
+            },
+        );
+
+        controller.refresh_devices();
+
+        assert_eq!(
+            controller.app_state().selected_device_id.as_deref(),
+            Some("kitchen")
+        );
+        assert_eq!(controller.devices().len(), 2);
+        assert_eq!(controller.app_state().active_session, SessionState::Idle);
+    }
+
+    #[test]
+    fn refresh_devices_keeps_streaming_when_runtime_session_is_active() {
+        let mut controller = AppController::new(
+            StubSessionService {
+                devices: vec![build_device("living-room", "Living Room", "192.168.1.10")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                stored_credentials: Arc::new(Mutex::new(Vec::new())),
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig {
+                preferred_device_id: Some(String::from("living-room")),
+                ..AppConfig::default()
+            },
+        );
+
+        controller.refresh_devices();
+
+        assert!(matches!(
+            controller.app_state().active_session,
+            SessionState::Streaming { .. }
+        ));
+        assert_eq!(
+            controller.app_state().selected_device_id.as_deref(),
+            Some("living-room")
+        );
+    }
+
+    #[test]
     fn resolve_target_device_prefers_last_used_device() {
         let mut controller = AppController::new(
             StubSessionService {
@@ -605,7 +707,7 @@ mod tests {
                     build_device("living-room", "Living Room", "192.168.1.10"),
                     build_device("kitchen", "Kitchen", "192.168.1.11"),
                 ],
-                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 stored_credentials: Arc::new(Mutex::new(Vec::new())),
                 last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
@@ -725,6 +827,60 @@ mod tests {
         assert_eq!(
             controller.last_error(),
             Some("Receiver 认证失败，请重新配对后再试")
+        );
+    }
+
+    #[test]
+    fn initialize_auto_reconnects_selected_device() {
+        let mut controller = AppController::new(
+            StubSessionService {
+                devices: vec![build_device("kitchen", "Kitchen", "192.168.1.10")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
+                stored_credentials: Arc::new(Mutex::new(Vec::new())),
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig {
+                preferred_device_id: Some(String::from("kitchen")),
+                auto_reconnect: true,
+                ..AppConfig::default()
+            },
+        );
+
+        controller.initialize();
+
+        assert_eq!(
+            controller.app_state().active_session,
+            SessionState::AwaitingPairing {
+                device_id: String::from("kitchen")
+            }
+        );
+    }
+
+    #[test]
+    fn initialize_skips_auto_reconnect_when_runtime_is_already_streaming() {
+        let mut controller = AppController::new(
+            StubSessionService {
+                devices: vec![build_device("living-room", "Living Room", "192.168.1.10")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                stored_credentials: Arc::new(Mutex::new(Vec::new())),
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig {
+                preferred_device_id: Some(String::from("living-room")),
+                auto_reconnect: true,
+                ..AppConfig::default()
+            },
+        );
+
+        controller.initialize();
+
+        assert!(matches!(
+            controller.app_state().active_session,
+            SessionState::Streaming { .. }
+        ));
+        assert_eq!(
+            controller.app_state().selected_device_id.as_deref(),
+            Some("living-room")
         );
     }
 

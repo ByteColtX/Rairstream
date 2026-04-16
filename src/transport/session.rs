@@ -77,6 +77,7 @@ pub struct RaopConnection {
     control_target: SocketAddr,
     timing_responder: Option<TimingResponder>,
     rtsp_keepalive: Option<RtspKeepalive>,
+    transport_terminated: Arc<AtomicBool>,
 }
 
 impl RaopConnection {
@@ -109,6 +110,11 @@ impl RaopConnection {
         self.stop_timing_responder();
         debug!(endpoint = %self.session.descriptor().device.endpoint(), "TEARDOWN 已完成");
         Ok(())
+    }
+
+    #[must_use]
+    pub fn is_terminated(&self) -> bool {
+        self.transport_terminated.load(Ordering::SeqCst)
     }
 
     fn stop_timing_responder(&mut self) {
@@ -195,6 +201,14 @@ impl PreparedConnection {
         match self {
             Self::ClassicRaop(connection) => connection.stream_transport(),
             Self::ModernAirPlay(connection) => connection.stream_transport(),
+        }
+    }
+
+    #[must_use]
+    pub fn is_terminated(&self) -> bool {
+        match self {
+            Self::ClassicRaop(connection) => connection.is_terminated(),
+            Self::ModernAirPlay(connection) => connection.is_terminated(),
         }
     }
 }
@@ -531,6 +545,11 @@ impl ModernAirPlayConnection {
     pub fn stream_transport(&self) -> Result<RaopStreamTransport, AirPlayError> {
         self.raop_connection.stream_transport()
     }
+
+    #[must_use]
+    pub fn is_terminated(&self) -> bool {
+        self.raop_connection.is_terminated()
+    }
 }
 
 /// 首版 `RAOP` 会话骨架。
@@ -713,12 +732,14 @@ impl RaopSession {
         self.apply_record_response(&record_response)?;
 
         let keepalive_interval = compute_rtsp_keepalive_interval(setup_reply.session_timeout_secs);
+        let transport_terminated = Arc::new(AtomicBool::new(false));
         let rtsp_keepalive = RtspKeepalive::start(
             rtsp_client,
             self.descriptor.clone(),
             setup_reply.session_id.clone(),
             self.cseq,
             keepalive_interval,
+            Arc::clone(&transport_terminated),
         )?;
         let audio_target =
             resolve_socket_addr(&self.descriptor.device.host, setup_reply.server_port)?;
@@ -736,6 +757,7 @@ impl RaopSession {
             control_target,
             timing_responder: Some(timing_responder),
             rtsp_keepalive: Some(rtsp_keepalive),
+            transport_terminated,
         })
     }
 
@@ -843,6 +865,7 @@ struct RtspKeepaliveWorker {
     cseq: u32,
     interval: Duration,
     command_rx: Receiver<RtspKeepaliveCommand>,
+    transport_terminated: Arc<AtomicBool>,
 }
 
 impl RtspKeepalive {
@@ -852,6 +875,7 @@ impl RtspKeepalive {
         session_id: String,
         initial_cseq: u32,
         interval: Duration,
+        transport_terminated: Arc<AtomicBool>,
     ) -> Result<Self, AirPlayError> {
         let endpoint = descriptor.device.endpoint();
         let (command_tx, command_rx) = mpsc::channel();
@@ -865,6 +889,7 @@ impl RtspKeepalive {
                     cseq: initial_cseq,
                     interval,
                     command_rx,
+                    transport_terminated,
                 }
                 .run();
             })
@@ -948,6 +973,7 @@ impl RtspKeepaliveWorker {
                                     error = %error,
                                     "RTSP keepalive 收到失败响应"
                                 );
+                                self.transport_terminated.store(true, Ordering::SeqCst);
                                 break;
                             }
                             trace!(
@@ -964,6 +990,7 @@ impl RtspKeepaliveWorker {
                                 error = %error,
                                 "RTSP keepalive 失败"
                             );
+                            self.transport_terminated.store(true, Ordering::SeqCst);
                             break;
                         }
                     }

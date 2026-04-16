@@ -46,6 +46,11 @@ where
         self.menu_model()
     }
 
+    pub fn sync_runtime_state(&mut self) -> TrayMenuModel {
+        self.controller.refresh_devices();
+        self.menu_model()
+    }
+
     pub fn select_device(&mut self, device_id: &str) -> Result<TrayMenuModel, RairstreamError> {
         self.controller.select_device(device_id)?;
         Ok(self.menu_model())
@@ -211,6 +216,26 @@ mod tests {
             })
         }
 
+        fn reconcile_app_state(
+            &self,
+            selected_device_id: Option<String>,
+        ) -> Result<AppState, RairstreamError> {
+            Ok(match *self.start_behavior.lock().unwrap() {
+                StartBehavior::Success => AppState {
+                    selected_device_id,
+                    active_session: SessionState::Streaming {
+                        device_id: String::from("living-room"),
+                    },
+                },
+                StartBehavior::AwaitingPairing
+                | StartBehavior::Authenticating
+                | StartBehavior::Failure => AppState {
+                    selected_device_id,
+                    active_session: SessionState::Idle,
+                },
+            })
+        }
+
         fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
             let mut last_sender_volume_percent = self.last_sender_volume_percent.lock().unwrap();
             *last_sender_volume_percent = Some(percent);
@@ -249,6 +274,32 @@ mod tests {
         assert_eq!(controller.state().devices.len(), 1);
         assert_eq!(model.device_items.len(), 1);
         assert_eq!(model.device_items[0].device_id, "living-room");
+        assert_eq!(model.status_label, "Rairstream：正在串流 Living Room");
+    }
+
+    #[test]
+    fn test_initialize_skips_auto_reconnect_when_runtime_already_streaming() {
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("living-room", "Living Room")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig {
+                auto_reconnect: true,
+                preferred_device_id: Some(String::from("living-room")),
+                ..AppConfig::default()
+            },
+        );
+
+        let model = controller.initialize();
+
+        assert_eq!(model.status_label, "Rairstream：正在串流 Living Room");
+        assert!(matches!(
+            controller.state().app_state.active_session,
+            SessionState::Streaming { .. }
+        ));
     }
 
     #[test]
@@ -281,7 +332,7 @@ mod tests {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("living-room", "Living Room")],
-                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 pair_behavior: PairBehavior::Success,
                 last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },

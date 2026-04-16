@@ -80,6 +80,12 @@ impl ActiveStreamSession {
 
         Ok(())
     }
+
+    fn is_terminated(&self) -> bool {
+        self.transport
+            .as_ref()
+            .is_some_and(PreparedConnection::is_terminated)
+    }
 }
 
 impl Drop for ActiveStreamSession {
@@ -307,6 +313,41 @@ where
         })
     }
 
+    pub fn reconcile_app_state(
+        &self,
+        selected_device_id: Option<String>,
+    ) -> Result<AppState, RairstreamError> {
+        let terminated = {
+            let active_session = self.lock_active_session()?;
+            active_session
+                .as_ref()
+                .is_some_and(ActiveStreamSession::is_terminated)
+        };
+        if terminated {
+            if let Some(session) = self.take_active_session()? {
+                warn!(device_id = %session.device_id, "检测到底层会话已失效，开始回收活动串流会话");
+                session.stop()?;
+            }
+        }
+
+        let active_session = self.lock_active_session()?;
+        let streaming_device_id = active_session
+            .as_ref()
+            .map(|session| session.device_id.clone());
+        drop(active_session);
+
+        Ok(match streaming_device_id {
+            Some(device_id) => AppState {
+                selected_device_id: Some(device_id.clone()),
+                active_session: SessionState::Streaming { device_id },
+            },
+            None => AppState {
+                selected_device_id,
+                active_session: SessionState::Idle,
+            },
+        })
+    }
+
     pub fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
         let percent = percent.min(100);
         {
@@ -463,6 +504,17 @@ mod tests {
 
         assert_eq!(state.active_session, SessionState::Idle);
         assert!(state.selected_device_id.is_none());
+    }
+
+    #[test]
+    fn coordinator_reconcile_without_active_stream_keeps_selected_device() {
+        let coordinator = SessionCoordinator::new(StubDiscoveryService);
+        let state = coordinator
+            .reconcile_app_state(Some(String::from("living-room")))
+            .unwrap();
+
+        assert_eq!(state.active_session, SessionState::Idle);
+        assert_eq!(state.selected_device_id.as_deref(), Some("living-room"));
     }
 
     #[test]
