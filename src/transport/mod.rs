@@ -27,6 +27,12 @@ pub const RAOP_CHANNELS: u16 = 2;
 pub const RAOP_BITS_PER_SAMPLE: u16 = 16;
 pub const RAOP_FRAMES_PER_PACKET: usize = 352;
 pub const RAOP_STARTUP_LATENCY_FRAMES: u32 = 11_025;
+pub const RAOP_STARTUP_LATENCY_MILLIS: u32 =
+    startup_latency_millis(RAOP_STARTUP_LATENCY_FRAMES, RAOP_SAMPLE_RATE_HZ);
+
+const fn startup_latency_millis(frames: u32, sample_rate_hz: u32) -> u32 {
+    frames.saturating_mul(1_000) / sample_rate_hz
+}
 
 /// 流建立前需要的最小会话信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +166,8 @@ pub enum AirPlayError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RaopSession, SessionDescriptor,
+        AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES,
+        RAOP_STARTUP_LATENCY_MILLIS, RaopSession, SessionDescriptor,
     };
     use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
@@ -234,6 +241,12 @@ mod tests {
             descriptor.validate().unwrap_err(),
             AirPlayError::InvalidSession { .. }
         ));
+    }
+
+    #[test]
+    fn startup_latency_baseline_matches_current_raop_profile() {
+        assert_eq!(RAOP_STARTUP_LATENCY_FRAMES, 11_025);
+        assert_eq!(RAOP_STARTUP_LATENCY_MILLIS, 250);
     }
 
     #[test]
