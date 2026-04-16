@@ -3553,6 +3553,14 @@ mod tests {
     }
 
     #[test]
+    fn keepalive_interval_clamps_five_second_timeout_to_four_seconds() {
+        assert_eq!(
+            super::compute_rtsp_keepalive_interval(Some(5)),
+            Duration::from_secs(4)
+        );
+    }
+
+    #[test]
     fn keepalive_interval_uses_half_of_longer_session_timeout() {
         assert_eq!(
             super::compute_rtsp_keepalive_interval(Some(120)),
