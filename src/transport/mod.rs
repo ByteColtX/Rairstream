@@ -166,8 +166,8 @@ pub enum AirPlayError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES,
-        RAOP_STARTUP_LATENCY_MILLIS, RaopSession, SessionDescriptor,
+        AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
+        RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS, RaopSession, SessionDescriptor,
     };
     use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
@@ -247,6 +247,14 @@ mod tests {
     fn startup_latency_baseline_matches_current_raop_profile() {
         assert_eq!(RAOP_STARTUP_LATENCY_FRAMES, 11_025);
         assert_eq!(RAOP_STARTUP_LATENCY_MILLIS, 250);
+    }
+
+    #[test]
+    fn startup_latency_baseline_is_derived_from_frames_and_sample_rate() {
+        assert_eq!(
+            RAOP_STARTUP_LATENCY_MILLIS,
+            RAOP_STARTUP_LATENCY_FRAMES * 1_000 / RAOP_SAMPLE_RATE_HZ
+        );
     }
 
     #[test]
