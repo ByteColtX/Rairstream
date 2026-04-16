@@ -4,7 +4,7 @@ use super::state::TrayMenuModel;
 use crate::app::{RairstreamError, SessionCoordinator, SessionState};
 use crate::config::AppConfig;
 use crate::discovery::DiscoveryService;
-use inputbox::InputBox;
+use inputbox::{InputBox, InputMode};
 use std::collections::HashMap;
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -21,7 +21,36 @@ enum TrayAction {
     ToggleSenderMute,
     SetSenderVolume(u8),
     StopStreaming,
+    ShowAbout,
     Quit,
+}
+
+struct TrayMenuState {
+    menu: Menu,
+    action_map: HashMap<MenuId, TrayAction>,
+}
+
+impl TrayMenuState {
+    fn new(
+        model: &TrayMenuModel,
+        controller: &TrayController<impl crate::app::SessionControlService>,
+    ) -> Result<Self, TrayUiError> {
+        let mut state = Self {
+            menu: Menu::new(),
+            action_map: HashMap::new(),
+        };
+        state.sync(model, controller)?;
+        Ok(state)
+    }
+
+    fn sync(
+        &mut self,
+        model: &TrayMenuModel,
+        controller: &TrayController<impl crate::app::SessionControlService>,
+    ) -> Result<(), TrayUiError> {
+        clear_menu(&self.menu);
+        rebuild_menu(&self.menu, &mut self.action_map, model, controller)
+    }
 }
 
 pub fn run_tray_app<D>(
@@ -37,7 +66,7 @@ where
 
     let mut controller = TrayController::new(coordinator, config);
     let initial_model = controller.initialize();
-    let (initial_menu, mut action_map) = build_menu(&initial_model, &controller)?;
+    let mut menu_state = TrayMenuState::new(&initial_model, &controller)?;
     let icon = build_icon()?;
     let mut event_loop_builder = EventLoopBuilder::<MenuEvent>::with_user_event();
     let event_loop = event_loop_builder.build();
@@ -49,7 +78,7 @@ where
 
     let tray_icon = TrayIconBuilder::new()
         .with_tooltip(initial_model.status_label.clone())
-        .with_menu(Box::new(initial_menu))
+        .with_menu(Box::new(menu_state.menu.clone()))
         .with_menu_on_left_click(true)
         .with_icon(icon)
         .build()
@@ -64,7 +93,7 @@ where
             handle_menu_event(
                 &mut controller,
                 &tray_icon,
-                &mut action_map,
+                &mut menu_state,
                 &menu_event.id,
                 control_flow,
             );
@@ -75,11 +104,11 @@ where
 fn handle_menu_event(
     controller: &mut TrayController<impl crate::app::SessionControlService>,
     tray_icon: &TrayIcon,
-    action_map: &mut HashMap<MenuId, TrayAction>,
+    menu_state: &mut TrayMenuState,
     menu_id: &MenuId,
     control_flow: &mut ControlFlow,
 ) {
-    let model = match action_map.get(menu_id).cloned() {
+    let model = match menu_state.action_map.get(menu_id).cloned() {
         Some(TrayAction::RefreshDevices) => {
             info!("托盘菜单触发刷新设备");
             controller.refresh_devices()
@@ -127,6 +156,24 @@ fn handle_menu_event(
                 }
             }
         }
+        Some(TrayAction::ShowAbout) => {
+            info!("托盘菜单触发关于");
+            if let Err(error) = show_about_dialog() {
+                warn!(error = %error, "显示关于弹窗失败，保留当前菜单状态");
+                controller.handle_error(
+                    None,
+                    &RairstreamError::InvalidConfiguration {
+                        message: error.to_string(),
+                    },
+                );
+                let model = controller.menu_model();
+                if let Err(error) = sync_menu_model(tray_icon, menu_state, &model, controller) {
+                    error!(error = %error, "应用托盘菜单状态失败，准备退出事件循环");
+                    *control_flow = ControlFlow::ExitWithCode(1);
+                }
+            }
+            return;
+        }
         Some(TrayAction::Quit) => {
             info!("托盘菜单触发退出");
             if let Err(error) = controller.stop_streaming() {
@@ -138,12 +185,9 @@ fn handle_menu_event(
         None => return,
     };
 
-    match apply_menu_model(tray_icon, &model, controller) {
-        Ok(updated_action_map) => *action_map = updated_action_map,
-        Err(error) => {
-            error!(error = %error, "应用托盘菜单状态失败，准备退出事件循环");
-            *control_flow = ControlFlow::ExitWithCode(1);
-        }
+    if let Err(error) = sync_menu_model(tray_icon, menu_state, &model, controller) {
+        error!(error = %error, "应用托盘菜单状态失败，准备退出事件循环");
+        *control_flow = ControlFlow::ExitWithCode(1);
     }
 }
 
@@ -207,33 +251,38 @@ fn handle_pairing_prompt(
     }
 }
 
-fn build_menu(
+fn clear_menu(menu: &Menu) {
+    while menu.remove_at(0).is_some() {}
+}
+
+fn rebuild_menu(
+    menu: &Menu,
+    action_map: &mut HashMap<MenuId, TrayAction>,
     model: &TrayMenuModel,
     controller: &TrayController<impl crate::app::SessionControlService>,
-) -> Result<(Menu, HashMap<MenuId, TrayAction>), TrayUiError> {
-    let menu = Menu::new();
-    let mut action_map = HashMap::new();
+) -> Result<(), TrayUiError> {
+    action_map.clear();
 
-    append_static_item(&menu, model.status_label.as_str(), false)?;
-    append_separator(&menu)?;
+    append_static_item(menu, model.status_label.as_str(), false)?;
+    append_separator(menu)?;
 
     append_action_item(
-        &menu,
-        &mut action_map,
+        menu,
+        action_map,
         "刷新设备",
         model.refresh_enabled,
         TrayAction::RefreshDevices,
     )?;
     append_action_item(
-        &menu,
-        &mut action_map,
+        menu,
+        action_map,
         model.auto_reconnect_label.as_str(),
         true,
         TrayAction::ToggleAutoReconnect,
     )?;
     append_action_item(
-        &menu,
-        &mut action_map,
+        menu,
+        action_map,
         model.launch_at_startup_label.as_str(),
         true,
         TrayAction::ToggleLaunchAtStartup,
@@ -244,41 +293,41 @@ fn build_menu(
         SessionState::Streaming { .. }
     ) {
         append_action_item(
-            &menu,
-            &mut action_map,
+            menu,
+            action_map,
             "停止串流",
             true,
             TrayAction::StopStreaming,
         )?;
     }
 
-    append_static_item(&menu, "发送音量", false)?;
+    append_static_item(menu, "发送音量", false)?;
     append_action_item(
-        &menu,
-        &mut action_map,
+        menu,
+        action_map,
         model.mute_label.as_str(),
         true,
         TrayAction::ToggleSenderMute,
     )?;
     for volume_item in &model.volume_items {
         append_action_item(
-            &menu,
-            &mut action_map,
+            menu,
+            action_map,
             volume_item.label.as_str(),
             true,
             TrayAction::SetSenderVolume(volume_item.percent),
         )?;
     }
 
-    append_separator(&menu)?;
+    append_separator(menu)?;
 
     match model.empty_label.as_deref() {
-        Some(empty_label) => append_static_item(&menu, empty_label, false)?,
+        Some(empty_label) => append_static_item(menu, empty_label, false)?,
         None => {
             for device_item in &model.device_items {
                 append_action_item(
-                    &menu,
-                    &mut action_map,
+                    menu,
+                    action_map,
                     device_item.label.as_str(),
                     device_item.enabled,
                     TrayAction::SelectDevice(device_item.device_id.clone()),
@@ -287,10 +336,11 @@ fn build_menu(
         }
     }
 
-    append_separator(&menu)?;
-    append_action_item(&menu, &mut action_map, "退出", true, TrayAction::Quit)?;
+    append_separator(menu)?;
+    append_action_item(menu, action_map, "关于", true, TrayAction::ShowAbout)?;
+    append_action_item(menu, action_map, "退出", true, TrayAction::Quit)?;
 
-    Ok((menu, action_map))
+    Ok(())
 }
 
 fn append_static_item(menu: &Menu, label: &str, enabled: bool) -> Result<(), TrayUiError> {
@@ -327,21 +377,19 @@ fn append_separator(menu: &Menu) -> Result<(), TrayUiError> {
     Ok(())
 }
 
-fn apply_menu_model(
+fn sync_menu_model(
     tray_icon: &TrayIcon,
+    menu_state: &mut TrayMenuState,
     model: &TrayMenuModel,
     controller: &TrayController<impl crate::app::SessionControlService>,
-) -> Result<HashMap<MenuId, TrayAction>, TrayUiError> {
-    let (menu, action_map) = build_menu(model, controller)?;
-
-    tray_icon.set_menu(Some(Box::new(menu)));
+) -> Result<(), TrayUiError> {
+    menu_state.sync(model, controller)?;
     tray_icon
         .set_tooltip(Some(model.status_label.as_str()))
         .map_err(|error| TrayUiError::UpdateTooltip {
             message: error.to_string(),
         })?;
-
-    Ok(action_map)
+    Ok(())
 }
 
 fn prompt_pairing_pin(
@@ -365,6 +413,34 @@ fn prompt_pairing_pin(
         })
 }
 
+fn show_about_dialog() -> Result<(), TrayUiError> {
+    InputBox::new()
+        .title("关于 Rairstream")
+        .prompt("软件基本信息")
+        .default_text(build_about_message())
+        .mode(InputMode::Multiline)
+        .width(360)
+        .height(180)
+        .ok_label("关闭")
+        .cancel_label("取消")
+        .show()
+        .map(|_| ())
+        .map_err(|error| TrayUiError::Initialize {
+            message: error.to_string(),
+        })
+}
+
+fn build_about_message() -> String {
+    format_about_message(
+        env!("CARGO_PKG_VERSION"),
+        option_env!("RAIRSTREAM_GIT_COMMIT").unwrap_or("unknown"),
+    )
+}
+
+fn format_about_message(version: &str, commit_hash: &str) -> String {
+    format!("Rairstream\n版本：{version}\n提交：{commit_hash}")
+}
+
 fn build_icon() -> Result<Icon, TrayUiError> {
     const ICON_WIDTH: u32 = 16;
     const ICON_HEIGHT: u32 = 16;
@@ -386,4 +462,23 @@ fn build_icon() -> Result<Icon, TrayUiError> {
     Icon::from_rgba(rgba, ICON_WIDTH, ICON_HEIGHT).map_err(|error| TrayUiError::CreateTrayIcon {
         message: error.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_about_message;
+
+    #[test]
+    fn test_format_about_message_contains_version_and_commit() {
+        let message = format_about_message("0.1.0", "abc1234");
+
+        assert_eq!(message, "Rairstream\n版本：0.1.0\n提交：abc1234");
+    }
+
+    #[test]
+    fn test_format_about_message_supports_unknown_commit() {
+        let message = format_about_message("0.1.0", "unknown");
+
+        assert_eq!(message, "Rairstream\n版本：0.1.0\n提交：unknown");
+    }
 }
