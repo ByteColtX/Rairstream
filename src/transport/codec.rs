@@ -465,6 +465,29 @@ mod tests {
     }
 
     #[test]
+    fn resampler_outputs_packets_for_48khz_input_path() {
+        let format = AudioFormat {
+            sample_rate_hz: 48_000,
+            channels: 8,
+            bits_per_sample: 32,
+            sample_type: AudioSampleType::Float,
+        };
+        let mut resampler = AudioResampler::new(format);
+        let mut bytes = Vec::new();
+        for _ in 0..768 {
+            for sample in [0.1_f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 2);
+        assert!(packets.iter().all(|packet| packet.len() == 352 * 4));
+    }
+
+    #[test]
     fn resampler_outputs_pcm_packets_for_common_windows_mix_profile() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
@@ -501,6 +524,28 @@ mod tests {
         let packets = resampler.push_chunk(&chunk).unwrap();
 
         assert_eq!(packets.len(), 2);
+    }
+
+    #[test]
+    fn resampler_outputs_packets_for_44_1khz_input_path_without_resampling() {
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 2,
+            bits_per_sample: 16,
+            sample_type: AudioSampleType::Int,
+        };
+        let mut resampler = AudioResampler::new(format);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&1000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-1000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert_eq!(packets[0].len(), 352 * 4);
     }
 
     #[test]
