@@ -111,7 +111,7 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 - [x] Auto reconnect
 - [x] Remember the last-used device
 - [ ] Launch at startup
-- [ ] Start minimized to tray
+- [x] Start minimized to tray
 - [x] Clearer recovery paths after pairing / authentication failures
 
 ### Compatibility & validation
