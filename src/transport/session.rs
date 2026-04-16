@@ -1189,14 +1189,18 @@ fn build_rtp_session_seed(descriptor: &SessionDescriptor) -> (u16, u32, u32) {
     hash_identifier_segment(&mut hash, &timestamp.to_be_bytes());
 
     let initial_sequence = u16::try_from(hash & 0xffff_u64).unwrap_or(1).max(1);
-    let initial_timestamp = u32::try_from((hash >> 16) & 0xffff_ffff_u64)
-        .unwrap_or_default()
-        .wrapping_add(RAOP_STARTUP_LATENCY_FRAMES);
+    let initial_timestamp = apply_startup_latency_offset(
+        u32::try_from((hash >> 16) & 0xffff_ffff_u64).unwrap_or_default(),
+    );
     let audio_ssrc = u32::try_from((hash >> 8) & 0xffff_ffff_u64)
         .unwrap_or(1)
         .max(1);
 
     (initial_sequence, initial_timestamp, audio_ssrc)
+}
+
+const fn apply_startup_latency_offset(base_timestamp: u32) -> u32 {
+    base_timestamp.wrapping_add(RAOP_STARTUP_LATENCY_FRAMES)
 }
 
 fn hash_identifier_segment(hash: &mut u64, bytes: &[u8]) {
@@ -3192,8 +3196,28 @@ mod tests {
         let (sequence, timestamp) = session.packet_counters().peek_audio_packet();
 
         assert!(sequence > 0);
-        assert!(timestamp >= RAOP_STARTUP_LATENCY_FRAMES);
         assert!(session.audio_ssrc() > 0);
+        assert!(timestamp >= RAOP_STARTUP_LATENCY_FRAMES);
+    }
+
+    #[test]
+    fn startup_latency_offset_adds_raop_baseline_to_timestamp_seed() {
+        assert_eq!(
+            super::apply_startup_latency_offset(0),
+            RAOP_STARTUP_LATENCY_FRAMES
+        );
+        assert_eq!(
+            super::apply_startup_latency_offset(1_000),
+            1_000 + RAOP_STARTUP_LATENCY_FRAMES
+        );
+    }
+
+    #[test]
+    fn startup_latency_offset_wraps_at_u32_boundary() {
+        assert_eq!(
+            super::apply_startup_latency_offset(u32::MAX),
+            RAOP_STARTUP_LATENCY_FRAMES - 1
+        );
     }
 
     #[test]
