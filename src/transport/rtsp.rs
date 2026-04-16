@@ -514,7 +514,8 @@ mod tests {
     use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
     use crate::transport::{
-        AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, SessionDescriptor,
+        AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
+        SessionDescriptor,
     };
 
     fn build_descriptor() -> SessionDescriptor {
@@ -692,6 +693,16 @@ mod tests {
         assert!(body.contains("a=rtpmap:96 L16/44100/2"));
         assert!(body.contains(&format!("a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}")));
         assert!(body.contains("m=audio 0 RTP/AVP 96"));
+    }
+
+    #[test]
+    fn announce_request_min_latency_matches_current_baseline_millis() {
+        assert_eq!(RAOP_STARTUP_LATENCY_MILLIS, 250);
+        assert_eq!(RAOP_STARTUP_LATENCY_FRAMES, 11_025);
+        assert_eq!(
+            RAOP_STARTUP_LATENCY_FRAMES,
+            RAOP_STARTUP_LATENCY_MILLIS * 44_100 / 1_000
+        );
     }
 
     #[test]
