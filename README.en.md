@@ -112,7 +112,7 @@ rairstream [OPTIONS] [smoke [DEVICE_FILTER]]
 - [x] Remember the last-used device
 - [ ] Launch at startup
 - [ ] Start minimized to tray
-- [ ] Clearer recovery paths after pairing / authentication failures
+- [x] Clearer recovery paths after pairing / authentication failures
 
 ### Compatibility & validation
 

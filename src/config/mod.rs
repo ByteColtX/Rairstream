@@ -147,6 +147,10 @@ impl AppConfig {
             .insert(device_id.into(), receiver_credentials);
     }
 
+    pub fn remove_paired_receiver(&mut self, device_id: &str) {
+        self.paired_receivers.remove(device_id);
+    }
+
     pub fn set_preferred_device_id(&mut self, device_id: Option<String>) {
         self.preferred_device_id = device_id;
     }
@@ -275,5 +279,25 @@ mod tests {
         config.set_sender_volume_percent(255);
 
         assert_eq!(config.sender_volume_percent, 100);
+    }
+
+    #[test]
+    fn remove_paired_receiver_deletes_existing_entry() {
+        let mut config = AppConfig::default();
+        config.upsert_paired_receiver(
+            "receiver-1",
+            ReceiverCredentials {
+                auth_flow: ReceiverAuthFlow::Modern,
+                controller_pairing_id: String::from("controller-id"),
+                controller_ltpk_hex: String::from("11"),
+                controller_ltsk_hex: String::from("22"),
+                receiver_pairing_id: String::from("receiver-id"),
+                receiver_ltpk_hex: String::from("33"),
+            },
+        );
+
+        config.remove_paired_receiver("receiver-1");
+
+        assert!(config.paired_receivers.is_empty());
     }
 }

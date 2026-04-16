@@ -273,7 +273,24 @@ where
     }
 
     pub fn handle_error(&mut self, device_id: Option<&str>, error: &RairstreamError) {
+        self.recover_from_error(device_id, error);
         self.state.last_error = Some(self.describe_error(device_id, error));
+    }
+
+    fn recover_from_error(&mut self, device_id: Option<&str>, error: &RairstreamError) {
+        if let RairstreamError::Transport(
+            crate::transport::AirPlayError::CredentialsMissing
+            | crate::transport::AirPlayError::AuthenticationFailed { .. },
+        ) = error
+        {
+            let Some(device_id) = device_id else {
+                return;
+            };
+            self.config.remove_paired_receiver(device_id);
+            if let Err(save_error) = self.config.save() {
+                warn!(device_id, error = %save_error, "清理失效配对记录失败，保留内存态更新");
+            }
+        }
     }
 
     fn describe_error(&self, device_id: Option<&str>, error: &RairstreamError) -> String {
@@ -868,7 +885,20 @@ mod tests {
                 pair_behavior: PairBehavior::Success,
                 last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
-            AppConfig::default(),
+            AppConfig {
+                paired_receivers: std::collections::HashMap::from([(
+                    String::from("den"),
+                    ReceiverCredentials {
+                        auth_flow: ReceiverAuthFlow::Modern,
+                        controller_pairing_id: String::from("controller-id"),
+                        controller_ltpk_hex: String::from("11"),
+                        controller_ltsk_hex: String::from("22"),
+                        receiver_pairing_id: String::from("receiver-id"),
+                        receiver_ltpk_hex: String::from("33"),
+                    },
+                )]),
+                ..AppConfig::default()
+            },
         );
 
         controller.refresh_devices();
@@ -887,6 +917,7 @@ mod tests {
             controller.menu_model().status_label,
             "Rairstream：Den 认证失败，请重新配对后再试"
         );
+        assert!(!controller.config.paired_receivers.contains_key("den"));
     }
 
     #[test]
@@ -898,7 +929,20 @@ mod tests {
                 pair_behavior: PairBehavior::Success,
                 last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
-            AppConfig::default(),
+            AppConfig {
+                paired_receivers: std::collections::HashMap::from([(
+                    String::from("den"),
+                    ReceiverCredentials {
+                        auth_flow: ReceiverAuthFlow::Modern,
+                        controller_pairing_id: String::from("controller-id"),
+                        controller_ltpk_hex: String::from("11"),
+                        controller_ltsk_hex: String::from("22"),
+                        receiver_pairing_id: String::from("receiver-id"),
+                        receiver_ltpk_hex: String::from("33"),
+                    },
+                )]),
+                ..AppConfig::default()
+            },
         );
 
         controller.refresh_devices();
@@ -911,6 +955,7 @@ mod tests {
             controller.state().last_error.as_deref(),
             Some("Den 缺少可用配对记录，请重新配对")
         );
+        assert!(!controller.config.paired_receivers.contains_key("den"));
     }
 
     #[test]
