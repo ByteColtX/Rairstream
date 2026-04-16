@@ -23,6 +23,8 @@ fn test_menu_model_without_devices_shows_placeholder() {
 
     assert_eq!(model.status_label, "Rairstream：空闲");
     assert!(model.refresh_enabled);
+    assert_eq!(model.volume_items.len(), 5);
+    assert_eq!(model.volume_items[4].label, "● 100%");
     assert!(model.device_items.is_empty());
     assert_eq!(model.empty_label.as_deref(), Some("未发现可用设备"));
 }
@@ -35,6 +37,7 @@ fn test_menu_model_for_idle_selection_shows_selected_device_label() {
             active_session: SessionState::Idle,
         },
         devices: vec![build_device("living-room", "Living Room")],
+        sender_volume_percent: 100,
         last_error: None,
     };
 
@@ -55,6 +58,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        sender_volume_percent: 100,
         last_error: None,
     };
     let pairing_state = TrayAppState {
@@ -65,6 +69,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        sender_volume_percent: 100,
         last_error: None,
     };
     let authenticating_state = TrayAppState {
@@ -75,6 +80,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        sender_volume_percent: 100,
         last_error: None,
     };
     let streaming_state = TrayAppState {
@@ -85,6 +91,7 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
             },
         },
         devices: vec![build_device("bedroom", "Bedroom")],
+        sender_volume_percent: 100,
         last_error: None,
     };
 
@@ -113,6 +120,23 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
     );
     assert_eq!(streaming_model.status_label, "Rairstream：正在串流 Bedroom");
     assert_eq!(streaming_model.device_items[0].label, "● Bedroom（串流中）");
+    assert_eq!(streaming_model.volume_items.len(), 5);
+}
+
+#[test]
+fn test_menu_model_marks_selected_volume_preset() {
+    let state = TrayAppState {
+        app_state: AppState::default(),
+        devices: Vec::new(),
+        sender_volume_percent: 50,
+        last_error: None,
+    };
+
+    let model = build_tray_menu_model(&state);
+
+    assert_eq!(model.volume_items[2].percent, 50);
+    assert!(model.volume_items[2].selected);
+    assert_eq!(model.volume_items[2].label, "● 50%");
 }
 
 #[test]
@@ -123,6 +147,7 @@ fn test_menu_model_for_discovering_disables_refresh_and_device_actions() {
             active_session: SessionState::Discovering,
         },
         devices: vec![build_device("office", "Office")],
+        sender_volume_percent: 100,
         last_error: None,
     };
 

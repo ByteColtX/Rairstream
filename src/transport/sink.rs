@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio::{AudioCaptureError, AudioChunk, AudioSink};
@@ -29,6 +30,7 @@ impl Default for RaopSinkConfig {
 #[derive(Debug)]
 pub struct RaopAudioSink {
     resampler: AudioResampler,
+    sender_volume_percent: Arc<Mutex<u8>>,
     transport: RaopStreamTransport,
     first_packet_in_stream: bool,
     sent_audio_packets: usize,
@@ -36,7 +38,11 @@ pub struct RaopAudioSink {
 
 impl RaopAudioSink {
     #[must_use]
-    pub fn new(source_format: crate::audio::AudioFormat, transport: RaopStreamTransport) -> Self {
+    pub fn new(
+        source_format: crate::audio::AudioFormat,
+        transport: RaopStreamTransport,
+        sender_volume_percent: Arc<Mutex<u8>>,
+    ) -> Self {
         debug!(
             sample_rate_hz = source_format.sample_rate_hz,
             channels = source_format.channels,
@@ -47,11 +53,25 @@ impl RaopAudioSink {
             sync_interval_packets = transport.sink_config.sync_interval_packets,
             "初始化 RAOP 音频发送端"
         );
+        let mut resampler = AudioResampler::new(source_format);
+        let initial_sender_volume_percent = sender_volume_percent
+            .lock()
+            .map(|sender_volume_percent| *sender_volume_percent)
+            .unwrap_or(100);
+        resampler.set_sender_volume_percent(initial_sender_volume_percent);
         Self {
-            resampler: AudioResampler::new(source_format),
+            resampler,
+            sender_volume_percent,
             transport,
             first_packet_in_stream: true,
             sent_audio_packets: 0,
+        }
+    }
+
+    fn sync_sender_volume(&mut self) {
+        if let Ok(sender_volume_percent) = self.sender_volume_percent.lock() {
+            self.resampler
+                .set_sender_volume_percent(*sender_volume_percent);
         }
     }
 
@@ -171,6 +191,7 @@ impl RaopAudioSink {
 
 impl AudioSink for RaopAudioSink {
     fn write(&mut self, chunk: AudioChunk) -> Result<(), AudioCaptureError> {
+        self.sync_sender_volume();
         let packets = self.resampler.push_chunk(&chunk).map_err(|error| {
             AudioCaptureError::InvalidFormat {
                 message: error.to_string(),
@@ -205,6 +226,7 @@ mod tests {
     use super::{RaopAudioSink, RaopSinkConfig};
     use crate::transport::RaopPacketCounters;
     use crate::transport::session::RaopStreamTransport;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn sink_config_defaults_match_raop_mvp() {
@@ -242,7 +264,7 @@ mod tests {
             bits_per_sample: 32,
             sample_type: AudioSampleType::Float,
         };
-        let mut sink = RaopAudioSink::new(format, transport);
+        let mut sink = RaopAudioSink::new(format, transport, Arc::new(Mutex::new(100)));
         let mut bytes = Vec::new();
         for _ in 0..768 {
             for sample in [0.1_f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] {

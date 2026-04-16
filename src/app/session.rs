@@ -1,6 +1,6 @@
 //! 会话编排层：连接配置、发现、采集与传输。
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::platform::ensure_supported_runtime;
 use super::{
@@ -38,15 +38,32 @@ struct ActiveStreamSession {
     device_id: String,
     capture: Option<RunningCapture>,
     transport: Option<PreparedConnection>,
+    sender_volume_percent: Arc<Mutex<u8>>,
 }
 
 impl ActiveStreamSession {
-    fn new(device_id: String, capture: RunningCapture, transport: PreparedConnection) -> Self {
+    fn new(
+        device_id: String,
+        capture: RunningCapture,
+        transport: PreparedConnection,
+        sender_volume_percent: Arc<Mutex<u8>>,
+    ) -> Self {
         Self {
             device_id,
             capture: Some(capture),
             transport: Some(transport),
+            sender_volume_percent,
         }
+    }
+
+    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+        let mut sender_volume_percent = self.sender_volume_percent.lock().map_err(|_| {
+            RairstreamError::InvalidConfiguration {
+                message: String::from("发送端音量运行态锁已损坏"),
+            }
+        })?;
+        *sender_volume_percent = percent.min(100);
+        Ok(())
     }
 
     fn stop(mut self) -> Result<(), RairstreamError> {
@@ -86,6 +103,7 @@ pub struct SessionCoordinator<D> {
     discovery: D,
     paired_receivers: Mutex<std::collections::HashMap<String, ReceiverCredentials>>,
     active_session: Mutex<Option<ActiveStreamSession>>,
+    sender_volume_percent: Arc<Mutex<u8>>,
 }
 
 impl<D> SessionCoordinator<D>
@@ -104,6 +122,7 @@ where
             discovery,
             paired_receivers: Mutex::new(paired_receivers),
             active_session: Mutex::new(None),
+            sender_volume_percent: Arc::new(Mutex::new(100)),
         }
     }
 
@@ -234,7 +253,11 @@ where
             }
         };
         info!(device_id = %device.id, "传输握手完成");
-        let sink = RaopAudioSink::new(format, connection.stream_transport()?);
+        let sink = RaopAudioSink::new(
+            format,
+            connection.stream_transport()?,
+            Arc::clone(&self.sender_volume_percent),
+        );
         let capture = match WindowsLoopbackCapture::start(sink) {
             Ok(capture) => capture,
             Err(error) => {
@@ -248,6 +271,7 @@ where
             device.id.clone(),
             capture,
             connection,
+            Arc::clone(&self.sender_volume_percent),
         ))?;
 
         if let Some(previous) = previous {
@@ -281,6 +305,24 @@ where
             selected_device_id: stopped_device_id,
             active_session: SessionState::Idle,
         })
+    }
+
+    pub fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+        let percent = percent.min(100);
+        {
+            let mut sender_volume_percent = self.sender_volume_percent.lock().map_err(|_| {
+                RairstreamError::InvalidConfiguration {
+                    message: String::from("发送端音量运行态锁已损坏"),
+                }
+            })?;
+            *sender_volume_percent = percent;
+        }
+
+        if let Some(active_session) = self.lock_active_session()?.as_ref() {
+            active_session.set_sender_volume_percent(percent)?;
+        }
+
+        Ok(())
     }
 
     fn session_descriptor(

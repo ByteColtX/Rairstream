@@ -1,10 +1,22 @@
 use crate::app::{AppState, SessionState, SpeakerDevice};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayAppState {
     pub app_state: AppState,
     pub devices: Vec<SpeakerDevice>,
+    pub sender_volume_percent: u8,
     pub last_error: Option<String>,
+}
+
+impl Default for TrayAppState {
+    fn default() -> Self {
+        Self {
+            app_state: AppState::default(),
+            devices: Vec::new(),
+            sender_volume_percent: 100,
+            last_error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,9 +28,17 @@ pub struct TrayDeviceMenuItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayVolumeMenuItem {
+    pub percent: u8,
+    pub label: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayMenuModel {
     pub status_label: String,
     pub refresh_enabled: bool,
+    pub volume_items: Vec<TrayVolumeMenuItem>,
     pub device_items: Vec<TrayDeviceMenuItem>,
     pub empty_label: Option<String>,
 }
@@ -31,6 +51,7 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
         .iter()
         .map(|device| build_device_menu_item(state, device, refresh_enabled))
         .collect::<Vec<_>>();
+    let volume_items = build_volume_menu_items(state.sender_volume_percent);
     let empty_label = if device_items.is_empty() {
         Some(String::from("未发现可用设备"))
     } else {
@@ -40,9 +61,25 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
     TrayMenuModel {
         status_label: build_status_label(state),
         refresh_enabled,
+        volume_items,
         device_items,
         empty_label,
     }
+}
+
+fn build_volume_menu_items(selected_percent: u8) -> Vec<TrayVolumeMenuItem> {
+    [0_u8, 25, 50, 75, 100]
+        .into_iter()
+        .map(|percent| TrayVolumeMenuItem {
+            percent,
+            label: if percent == selected_percent {
+                format!("● {percent}%")
+            } else {
+                format!("{percent}%")
+            },
+            selected: percent == selected_percent,
+        })
+        .collect()
 }
 
 fn build_status_label(state: &TrayAppState) -> String {
@@ -143,6 +180,8 @@ mod tests {
 
         assert_eq!(model.status_label, "Rairstream：空闲");
         assert!(model.refresh_enabled);
+        assert_eq!(model.volume_items.len(), 5);
+        assert!(model.volume_items[4].selected);
         assert!(model.device_items.is_empty());
         assert_eq!(model.empty_label.as_deref(), Some("未发现可用设备"));
     }
@@ -155,6 +194,7 @@ mod tests {
                 active_session: SessionState::Idle,
             },
             devices: vec![build_device("living-room", "Living Room")],
+            sender_volume_percent: 100,
             last_error: None,
         };
 
@@ -176,6 +216,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            sender_volume_percent: 100,
             last_error: None,
         };
 
@@ -195,6 +236,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            sender_volume_percent: 100,
             last_error: None,
         };
         let authenticating_state = TrayAppState {
@@ -205,6 +247,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            sender_volume_percent: 100,
             last_error: None,
         };
 
@@ -231,6 +274,7 @@ mod tests {
                 active_session: SessionState::Discovering,
             },
             devices: vec![build_device("office", "Office")],
+            sender_volume_percent: 100,
             last_error: None,
         };
 
@@ -251,6 +295,7 @@ mod tests {
                 },
             },
             devices: vec![build_device("kitchen", "Kitchen")],
+            sender_volume_percent: 100,
             last_error: Some(String::from("Kitchen 认证失败，请重新配对后再试")),
         };
 
@@ -260,5 +305,22 @@ mod tests {
             model.status_label,
             "Rairstream：Kitchen 认证失败，请重新配对后再试"
         );
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_marks_selected_volume_preset() {
+        let state = TrayAppState {
+            app_state: AppState::default(),
+            devices: Vec::new(),
+            sender_volume_percent: 50,
+            last_error: None,
+        };
+
+        let model = build_tray_menu_model(&state);
+
+        assert_eq!(model.volume_items.len(), 5);
+        assert_eq!(model.volume_items[2].percent, 50);
+        assert!(model.volume_items[2].selected);
+        assert_eq!(model.volume_items[2].label, "● 50%");
     }
 }

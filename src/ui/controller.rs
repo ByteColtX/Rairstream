@@ -19,6 +19,7 @@ pub trait TraySessionService {
     ) -> Result<(), RairstreamError>;
     fn start_streaming_session(&self, device: SpeakerDevice) -> Result<AppState, RairstreamError>;
     fn stop_streaming_session(&self) -> Result<AppState, RairstreamError>;
+    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError>;
 }
 
 impl<D> TraySessionService for SessionCoordinator<D>
@@ -56,6 +57,10 @@ where
     fn stop_streaming_session(&self) -> Result<AppState, RairstreamError> {
         SessionCoordinator::stop_streaming_session(self)
     }
+
+    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+        SessionCoordinator::set_sender_volume_percent(self, percent)
+    }
 }
 
 #[derive(Debug)]
@@ -72,6 +77,7 @@ where
     #[must_use]
     pub fn new(session_service: S, config: AppConfig) -> Self {
         let preferred_device_id = config.preferred_device_id.clone();
+        let sender_volume_percent = config.sender_volume_percent;
         Self {
             session_service,
             config,
@@ -81,6 +87,7 @@ where
                     active_session: SessionState::Idle,
                 },
                 devices: Vec::new(),
+                sender_volume_percent,
                 last_error: None,
             },
         }
@@ -207,6 +214,24 @@ where
         Ok(self.menu_model())
     }
 
+    pub fn set_sender_volume(&mut self, percent: u8) -> Result<TrayMenuModel, RairstreamError> {
+        let percent = percent.min(100);
+        self.config.set_sender_volume_percent(percent);
+        self.config.save()?;
+        self.state.sender_volume_percent = self.config.sender_volume_percent;
+
+        if matches!(
+            self.state.app_state.active_session,
+            SessionState::Streaming { .. }
+        ) {
+            self.session_service
+                .set_sender_volume_percent(self.state.sender_volume_percent)?;
+        }
+
+        self.state.last_error = None;
+        Ok(self.menu_model())
+    }
+
     fn retain_selected_device_id(&self, devices: &[SpeakerDevice]) -> Option<String> {
         self.state
             .app_state
@@ -282,6 +307,7 @@ mod tests {
     };
     use crate::config::{AppConfig, ReceiverAuthFlow, ReceiverCredentials};
     use crate::discovery::StubDiscoveryService;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone, Copy)]
     enum StartBehavior {
@@ -302,6 +328,7 @@ mod tests {
         devices: Vec<SpeakerDevice>,
         start_behavior: StartBehavior,
         pair_behavior: PairBehavior,
+        last_sender_volume_percent: std::sync::Arc<std::sync::Mutex<Option<u8>>>,
     }
 
     impl TraySessionService for StubSessionService {
@@ -383,6 +410,12 @@ mod tests {
                 active_session: SessionState::Idle,
             })
         }
+
+        fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+            let mut last_sender_volume_percent = self.last_sender_volume_percent.lock().unwrap();
+            *last_sender_volume_percent = Some(percent);
+            Ok(())
+        }
     }
 
     fn build_device(id: &str, name: &str) -> SpeakerDevice {
@@ -406,6 +439,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -424,6 +458,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 auto_reconnect: true,
@@ -448,6 +483,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 auto_reconnect: false,
@@ -472,6 +508,7 @@ mod tests {
                 devices: vec![build_device("kitchen", "Kitchen")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 preferred_device_id: Some(String::from("kitchen")),
@@ -494,6 +531,7 @@ mod tests {
                 devices: vec![build_device("office", "Office")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 preferred_device_id: Some(String::from("missing-device")),
@@ -513,6 +551,7 @@ mod tests {
                 devices: vec![build_device("bedroom", "Bedroom")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -544,6 +583,7 @@ mod tests {
                 devices: vec![build_device("bedroom", "Bedroom")],
                 start_behavior: StartBehavior::AwaitingPairing,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -562,6 +602,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Authenticating,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -583,6 +624,7 @@ mod tests {
                 devices: vec![build_device("studio", "Studio")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -603,6 +645,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Failure,
                 pair_behavior: PairBehavior::Failure,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -625,6 +668,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -653,6 +697,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::AwaitingPairing,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -681,6 +726,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -701,12 +747,56 @@ mod tests {
     }
 
     #[test]
+    fn test_set_sender_volume_updates_state_and_config_when_idle() {
+        let last_sender_volume_percent = Arc::new(Mutex::new(None));
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::clone(&last_sender_volume_percent),
+            },
+            AppConfig::default(),
+        );
+
+        let model = controller.set_sender_volume(50).unwrap();
+
+        assert_eq!(controller.state().sender_volume_percent, 50);
+        assert_eq!(controller.config.sender_volume_percent, 50);
+        assert_eq!(model.volume_items[2].percent, 50);
+        assert!(model.volume_items[2].selected);
+        assert_eq!(*last_sender_volume_percent.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn test_set_sender_volume_updates_active_stream() {
+        let last_sender_volume_percent = Arc::new(Mutex::new(None));
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("den", "Den")],
+                start_behavior: StartBehavior::Success,
+                pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::clone(&last_sender_volume_percent),
+            },
+            AppConfig::default(),
+        );
+
+        controller.refresh_devices();
+        controller.select_device("den").unwrap();
+        controller.set_sender_volume(75).unwrap();
+
+        assert_eq!(controller.state().sender_volume_percent, 75);
+        assert_eq!(*last_sender_volume_percent.lock().unwrap(), Some(75));
+    }
+
+    #[test]
     fn test_handle_error_maps_authentication_recovery_message() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -736,6 +826,7 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: StartBehavior::Success,
                 pair_behavior: PairBehavior::Success,
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );

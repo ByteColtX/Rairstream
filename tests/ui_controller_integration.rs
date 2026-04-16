@@ -124,6 +124,18 @@ fn test_select_device_transitions_or_returns_runtime_error() {
 }
 
 #[test]
+fn test_set_sender_volume_updates_state_without_active_stream() {
+    let coordinator = SessionCoordinator::new(StubDiscoveryService);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
+
+    let model = controller.set_sender_volume(25).unwrap();
+
+    assert_eq!(controller.state().sender_volume_percent, 25);
+    assert_eq!(model.volume_items[1].percent, 25);
+    assert!(model.volume_items[1].selected);
+}
+
+#[test]
 fn test_selecting_unknown_device_returns_configuration_error() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, AppConfig::default());

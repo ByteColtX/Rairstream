@@ -285,6 +285,7 @@ fn run_smoke_mode(device_filter: Option<&str>) -> Result<(), String> {
             connection
                 .stream_transport()
                 .map_err(|error| error.to_string())?,
+            std::sync::Arc::new(std::sync::Mutex::new(100)),
         ),
     );
     let capture = WindowsLoopbackCapture::start(sink).map_err(|error| error.to_string())?;

@@ -17,6 +17,7 @@ fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
     let mut config = AppConfig {
         auto_reconnect: true,
         preferred_device_id: None,
+        sender_volume_percent: 100,
         paired_receivers: std::collections::HashMap::new(),
     };
     config.paired_receivers.insert(
@@ -38,6 +39,7 @@ fn test_config_serializes_legacy_pin_auth_flow_when_non_default() {
         json!({
             "auto_reconnect": true,
             "preferred_device_id": null,
+            "sender_volume_percent": 100,
             "paired_receivers": {
                 "receiver-legacy": {
                     "auth_flow": "legacy_pin",
@@ -58,6 +60,7 @@ fn test_default_config_contract() {
 
     assert!(config.auto_reconnect);
     assert!(config.preferred_device_id.is_none());
+    assert_eq!(config.sender_volume_percent, 100);
     assert!(config.paired_receivers.is_empty());
 }
 
@@ -66,6 +69,7 @@ fn test_config_serializes_expected_json_shape() {
     let mut config = AppConfig {
         auto_reconnect: false,
         preferred_device_id: Some(String::from("living-room")),
+        sender_volume_percent: 50,
         paired_receivers: std::collections::HashMap::new(),
     };
     config
@@ -79,6 +83,7 @@ fn test_config_serializes_expected_json_shape() {
         json!({
             "auto_reconnect": false,
             "preferred_device_id": "living-room",
+            "sender_volume_percent": 50,
             "paired_receivers": {
                 "receiver-1": {
                     "controller_pairing_id": "controller-id",
@@ -97,6 +102,7 @@ fn test_config_deserializes_explicit_values() {
     let config: AppConfig = serde_json::from_value(json!({
         "auto_reconnect": false,
         "preferred_device_id": "office-speaker",
+        "sender_volume_percent": 25,
         "paired_receivers": {
             "receiver-1": {
                 "controller_pairing_id": "controller-id",
@@ -114,6 +120,7 @@ fn test_config_deserializes_explicit_values() {
         config.preferred_device_id.as_deref(),
         Some("office-speaker")
     );
+    assert_eq!(config.sender_volume_percent, 25);
     let credentials = config
         .paired_receivers
         .get("receiver-1")
@@ -160,6 +167,7 @@ fn test_config_load_migrates_missing_auth_flow_to_legacy_pin() {
         .expect("receiver-legacy credentials should exist");
 
     assert_eq!(credentials.auth_flow, ReceiverAuthFlow::LegacyPin);
+    assert_eq!(loaded.sender_volume_percent, 100);
 
     std::fs::remove_file(&path).expect("temp config file should be removable");
     std::fs::remove_dir(&temp_dir).expect("temp config dir should be removable");
@@ -185,6 +193,7 @@ fn test_config_defaults_missing_paired_receivers_to_empty_map() {
     .expect("config should default missing paired_receivers");
 
     assert!(config.paired_receivers.is_empty());
+    assert_eq!(config.sender_volume_percent, 100);
 }
 
 #[test]
@@ -200,6 +209,7 @@ fn test_config_load_save_round_trip_preserves_paired_receivers() {
     let mut config = AppConfig {
         auto_reconnect: false,
         preferred_device_id: Some(String::from("living-room")),
+        sender_volume_percent: 75,
         paired_receivers: std::collections::HashMap::new(),
     };
     config.upsert_paired_receiver("receiver-1", build_receiver_credentials());
@@ -224,4 +234,17 @@ fn test_config_rejects_invalid_preferred_device_type() {
     .expect_err("config should reject non-string preferred_device_id");
 
     assert!(error.to_string().contains("invalid type"));
+}
+
+#[test]
+fn test_config_clamps_sender_volume_percent_on_load() {
+    let config: AppConfig = serde_json::from_value(json!({
+        "auto_reconnect": true,
+        "preferred_device_id": null,
+        "sender_volume_percent": 255,
+        "paired_receivers": {}
+    }))
+    .expect("config should deserialize and clamp sender volume percent");
+
+    assert_eq!(config.sender_volume_percent, 100);
 }

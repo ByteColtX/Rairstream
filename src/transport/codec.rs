@@ -30,6 +30,7 @@ impl CodecDescription {
 #[derive(Debug, Clone)]
 pub struct AudioResampler {
     source_format: AudioFormat,
+    sender_volume_gain: f64,
     phase_numerator: u32,
     pending_input_frames: Vec<[f64; 2]>,
     pending_output_frames: Vec<[f64; 2]>,
@@ -40,10 +41,15 @@ impl AudioResampler {
     pub fn new(source_format: AudioFormat) -> Self {
         Self {
             source_format,
+            sender_volume_gain: 1.0,
             phase_numerator: 0,
             pending_input_frames: Vec::new(),
             pending_output_frames: Vec::new(),
         }
+    }
+
+    pub fn set_sender_volume_percent(&mut self, percent: u8) {
+        self.sender_volume_gain = f64::from(percent.min(100)) / 100.0;
     }
 
     pub fn push_chunk(&mut self, chunk: &AudioChunk) -> Result<Vec<Vec<u8>>, AirPlayError> {
@@ -57,6 +63,7 @@ impl AudioResampler {
         if mixed_frames.is_empty() {
             return Ok(Vec::new());
         }
+        apply_gain(&mut mixed_frames, self.sender_volume_gain);
 
         let resampled_frames = if self.source_format.sample_rate_hz == RAOP_SAMPLE_RATE_HZ {
             mixed_frames
@@ -168,6 +175,13 @@ fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError>
                 format.sample_type, format.bits_per_sample
             ),
         }),
+    }
+}
+
+fn apply_gain(frames: &mut [[f64; 2]], gain: f64) {
+    for frame in frames {
+        frame[0] *= gain;
+        frame[1] *= gain;
     }
 }
 
@@ -389,6 +403,47 @@ mod tests {
 
         assert_eq!(packets_a.len(), 1);
         assert_eq!(packets_b.len(), 1);
+    }
+
+    #[test]
+    fn resampler_scales_output_to_silence_at_zero_percent() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::new(format);
+        resampler.set_sender_volume_percent(0);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&1000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-1000_i16).to_le_bytes());
+        }
+
+        let packets = resampler
+            .push_chunk(&AudioChunk::new(format, bytes).unwrap())
+            .unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert!(packets[0].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn resampler_scales_output_by_half_at_fifty_percent() {
+        let format = AudioFormat::default();
+        let mut full_resampler = AudioResampler::new(format);
+        let mut half_resampler = AudioResampler::new(format);
+        half_resampler.set_sender_volume_percent(50);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&10_000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-10_000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let full_packets = full_resampler.push_chunk(&chunk).unwrap();
+        let half_packets = half_resampler.push_chunk(&chunk).unwrap();
+        let full_left = i16::from_be_bytes([full_packets[0][0], full_packets[0][1]]);
+        let half_left = i16::from_be_bytes([half_packets[0][0], half_packets[0][1]]);
+
+        assert!(half_left.abs() < full_left.abs());
+        assert!((i32::from(half_left.abs()) * 2 - i32::from(full_left.abs())).abs() <= 1);
     }
 
     #[test]

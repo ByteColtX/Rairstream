@@ -10,6 +10,7 @@ use thiserror::Error;
 
 const CONFIG_DIR_NAME: &str = "Rairstream";
 const CONFIG_FILE_NAME: &str = "config.json";
+const DEFAULT_SENDER_VOLUME_PERCENT: u8 = 100;
 
 /// 已保存接收端凭据对应的认证恢复路径。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -22,6 +23,22 @@ pub enum ReceiverAuthFlow {
 
 fn is_default_receiver_auth_flow(flow: &ReceiverAuthFlow) -> bool {
     *flow == ReceiverAuthFlow::Modern
+}
+
+const fn default_sender_volume_percent() -> u8 {
+    DEFAULT_SENDER_VOLUME_PERCENT
+}
+
+fn deserialize_sender_volume_percent<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let percent = u8::deserialize(deserializer)?;
+    Ok(clamp_sender_volume_percent(percent))
+}
+
+const fn clamp_sender_volume_percent(percent: u8) -> u8 {
+    if percent > 100 { 100 } else { percent }
 }
 
 /// `AirPlay` Receiver 接收端配对记录所需的长期身份材料。
@@ -41,6 +58,11 @@ pub struct ReceiverCredentials {
 pub struct AppConfig {
     pub auto_reconnect: bool,
     pub preferred_device_id: Option<String>,
+    #[serde(
+        default = "default_sender_volume_percent",
+        deserialize_with = "deserialize_sender_volume_percent"
+    )]
+    pub sender_volume_percent: u8,
     #[serde(default)]
     pub paired_receivers: HashMap<String, ReceiverCredentials>,
 }
@@ -50,6 +72,7 @@ impl Default for AppConfig {
         Self {
             auto_reconnect: true,
             preferred_device_id: None,
+            sender_volume_percent: DEFAULT_SENDER_VOLUME_PERCENT,
             paired_receivers: HashMap::new(),
         }
     }
@@ -70,9 +93,14 @@ impl AppConfig {
                         }
                     })?;
                 migrate_missing_receiver_auth_flow_to_legacy_pin(&mut value);
-                serde_json::from_value(value).map_err(|error| ConfigError::DeserializeFailed {
-                    message: error.to_string(),
-                })
+                let mut config: Self = serde_json::from_value(value).map_err(|error| {
+                    ConfigError::DeserializeFailed {
+                        message: error.to_string(),
+                    }
+                })?;
+                config.sender_volume_percent =
+                    clamp_sender_volume_percent(config.sender_volume_percent);
+                Ok(config)
             }
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(ConfigError::ReadFailed {
@@ -86,8 +114,10 @@ impl AppConfig {
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<(), ConfigError> {
+        let mut config = self.clone();
+        config.sender_volume_percent = clamp_sender_volume_percent(config.sender_volume_percent);
         let mut value =
-            serde_json::to_value(self).map_err(|error| ConfigError::SerializeFailed {
+            serde_json::to_value(config).map_err(|error| ConfigError::SerializeFailed {
                 message: error.to_string(),
             })?;
         persist_receiver_auth_flow(&mut value);
@@ -116,6 +146,10 @@ impl AppConfig {
 
     pub fn set_preferred_device_id(&mut self, device_id: Option<String>) {
         self.preferred_device_id = device_id;
+    }
+
+    pub fn set_sender_volume_percent(&mut self, percent: u8) {
+        self.sender_volume_percent = clamp_sender_volume_percent(percent);
     }
 }
 
@@ -200,7 +234,7 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, ReceiverAuthFlow, ReceiverCredentials};
+    use super::{AppConfig, DEFAULT_SENDER_VOLUME_PERCENT, ReceiverAuthFlow, ReceiverCredentials};
 
     #[test]
     fn default_config_enables_auto_reconnect() {
@@ -208,6 +242,7 @@ mod tests {
 
         assert!(config.auto_reconnect);
         assert!(config.preferred_device_id.is_none());
+        assert_eq!(config.sender_volume_percent, DEFAULT_SENDER_VOLUME_PERCENT);
         assert!(config.paired_receivers.is_empty());
     }
 
@@ -224,5 +259,14 @@ mod tests {
 
         assert_eq!(credentials.controller_pairing_id, "controller-id");
         assert_eq!(credentials.receiver_pairing_id, "receiver-id");
+    }
+
+    #[test]
+    fn set_sender_volume_percent_clamps_out_of_range_values() {
+        let mut config = AppConfig::default();
+
+        config.set_sender_volume_percent(255);
+
+        assert_eq!(config.sender_volume_percent, 100);
     }
 }

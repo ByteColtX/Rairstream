@@ -16,6 +16,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 enum TrayAction {
     RefreshDevices,
     SelectDevice(String),
+    SetSenderVolume(u8),
     StopStreaming,
     Quit,
 }
@@ -81,6 +82,14 @@ fn handle_menu_event(
             controller.refresh_devices()
         }
         Some(TrayAction::SelectDevice(device_id)) => handle_select_device(controller, &device_id),
+        Some(TrayAction::SetSenderVolume(percent)) => match controller.set_sender_volume(percent) {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(percent, error = %error, "设置发送端音量失败，保留当前菜单状态");
+                controller.handle_error(None, &error);
+                controller.menu_model()
+            }
+        },
         Some(TrayAction::StopStreaming) => {
             info!("托盘菜单触发停止串流");
             match controller.stop_streaming() {
@@ -204,6 +213,23 @@ fn build_menu(
         let stop_item = MenuItem::new("停止串流", true, None);
         action_map.insert(stop_item.id().clone(), TrayAction::StopStreaming);
         menu.append(&stop_item)
+            .map_err(|error| TrayUiError::CreateMenu {
+                message: error.to_string(),
+            })?;
+    }
+
+    let volume_header = MenuItem::new("发送音量", false, None);
+    menu.append(&volume_header)
+        .map_err(|error| TrayUiError::CreateMenu {
+            message: error.to_string(),
+        })?;
+    for volume_item in &model.volume_items {
+        let menu_item = MenuItem::new(volume_item.label.as_str(), true, None);
+        action_map.insert(
+            menu_item.id().clone(),
+            TrayAction::SetSenderVolume(volume_item.percent),
+        );
+        menu.append(&menu_item)
             .map_err(|error| TrayUiError::CreateMenu {
                 message: error.to_string(),
             })?;
