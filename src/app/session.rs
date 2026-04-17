@@ -7,7 +7,7 @@ use super::{
     AppState, DeviceSupport, RairstreamError, SessionState, SpeakerDevice, UnsupportedReason,
 };
 use crate::audio::{RunningCapture, WindowsLoopbackCapture};
-use crate::config::ReceiverCredentials;
+use crate::config::{MAX_SENDER_VOLUME_PERCENT, ReceiverCredentials};
 use crate::discovery::DiscoveryService;
 use crate::transport::{
     AirPlayError, PreparedConnection, PreparedTransportSession, RaopAudioSink, SessionDescriptor,
@@ -62,7 +62,7 @@ impl ActiveStreamSession {
                 message: String::from("发送端音量运行态锁已损坏"),
             }
         })?;
-        *sender_volume_percent = percent.min(100);
+        *sender_volume_percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
         Ok(())
     }
 
@@ -349,7 +349,7 @@ where
     }
 
     pub fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
-        let percent = percent.min(100);
+        let percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
         {
             let mut sender_volume_percent = self.sender_volume_percent.lock().map_err(|_| {
                 RairstreamError::InvalidConfiguration {

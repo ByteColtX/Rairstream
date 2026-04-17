@@ -344,6 +344,9 @@ fn rebuild_menu(
         true,
         TrayAction::ToggleSenderMute,
     )?;
+    if let Some(volume_warning_label) = model.volume_warning_label.as_deref() {
+        append_static_item(menu, volume_warning_label, false)?;
+    }
     for volume_item in &model.volume_items {
         append_action_item(
             menu,

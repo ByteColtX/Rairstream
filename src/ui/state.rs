@@ -49,6 +49,7 @@ pub struct TrayMenuModel {
     pub mute_label: String,
     pub muted: bool,
     pub volume_items: Vec<TrayVolumeMenuItem>,
+    pub volume_warning_label: Option<String>,
     pub device_items: Vec<TrayDeviceMenuItem>,
     pub empty_label: Option<String>,
 }
@@ -62,6 +63,7 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
         .map(|device| build_device_menu_item(state, device, refresh_enabled))
         .collect::<Vec<_>>();
     let volume_items = build_volume_menu_items(state.sender_volume_percent);
+    let volume_warning_label = build_volume_warning_label(state);
     let empty_label = if device_items.is_empty() {
         Some(String::from("未发现可用设备"))
     } else {
@@ -80,6 +82,7 @@ pub fn build_tray_menu_model(state: &TrayAppState) -> TrayMenuModel {
         },
         muted: state.sender_muted,
         volume_items,
+        volume_warning_label,
         device_items,
         empty_label,
     }
@@ -94,7 +97,7 @@ fn build_toggle_label(title: &str, enabled: bool) -> String {
 }
 
 fn build_volume_menu_items(selected_percent: u8) -> Vec<TrayVolumeMenuItem> {
-    [0_u8, 25, 50, 75, 100]
+    [0_u8, 25, 50, 75, 100, 125, 150, 200]
         .into_iter()
         .map(|percent| TrayVolumeMenuItem {
             percent,
@@ -106,6 +109,14 @@ fn build_volume_menu_items(selected_percent: u8) -> Vec<TrayVolumeMenuItem> {
             selected: percent == selected_percent,
         })
         .collect()
+}
+
+fn build_volume_warning_label(state: &TrayAppState) -> Option<String> {
+    if !state.sender_muted && state.sender_volume_percent > 100 {
+        Some(String::from("音量已提升超过 100%，高电平时可能出现失真"))
+    } else {
+        None
+    }
 }
 
 fn build_status_label(state: &TrayAppState) -> String {
@@ -208,8 +219,17 @@ mod tests {
         assert!(model.refresh_enabled);
         assert_eq!(model.auto_reconnect_label, "自动重连：开");
         assert_eq!(model.launch_at_startup_label, "开机启动：关");
-        assert_eq!(model.volume_items.len(), 5);
+        assert_eq!(model.volume_items.len(), 8);
+        assert_eq!(
+            model
+                .volume_items
+                .iter()
+                .map(|item| item.percent)
+                .collect::<Vec<_>>(),
+            vec![0, 25, 50, 75, 100, 125, 150, 200]
+        );
         assert!(model.volume_items[4].selected);
+        assert_eq!(model.volume_warning_label, None);
         assert!(model.device_items.is_empty());
         assert_eq!(model.empty_label.as_deref(), Some("未发现可用设备"));
     }
@@ -367,9 +387,62 @@ mod tests {
 
         let model = build_tray_menu_model(&state);
 
-        assert_eq!(model.volume_items.len(), 5);
+        assert_eq!(model.volume_items.len(), 8);
         assert_eq!(model.volume_items[2].percent, 50);
         assert!(model.volume_items[2].selected);
         assert_eq!(model.volume_items[2].label, "● 50%");
+        assert_eq!(model.volume_warning_label, None);
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_includes_boosted_volume_presets() {
+        let model = build_tray_menu_model(&TrayAppState::default());
+
+        assert_eq!(model.volume_items[5].percent, 125);
+        assert_eq!(model.volume_items[5].label, "125%");
+        assert!(!model.volume_items[5].selected);
+        assert_eq!(model.volume_items[6].percent, 150);
+        assert_eq!(model.volume_items[6].label, "150%");
+        assert!(!model.volume_items[6].selected);
+        assert_eq!(model.volume_items[7].percent, 200);
+        assert_eq!(model.volume_items[7].label, "200%");
+        assert!(!model.volume_items[7].selected);
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_shows_volume_warning_for_boosted_unmuted_volume() {
+        let state = TrayAppState {
+            app_state: AppState::default(),
+            devices: Vec::new(),
+            auto_reconnect: true,
+            launch_at_startup: false,
+            sender_volume_percent: 125,
+            sender_muted: false,
+            last_error: None,
+        };
+
+        let model = build_tray_menu_model(&state);
+
+        assert_eq!(
+            model.volume_warning_label.as_deref(),
+            Some("音量已提升超过 100%，高电平时可能出现失真")
+        );
+    }
+
+    #[test]
+    fn test_build_tray_menu_model_hides_volume_warning_for_muted_boosted_volume() {
+        let state = TrayAppState {
+            app_state: AppState::default(),
+            devices: Vec::new(),
+            auto_reconnect: true,
+            launch_at_startup: false,
+            sender_volume_percent: 125,
+            sender_muted: true,
+            last_error: None,
+        };
+
+        let model = build_tray_menu_model(&state);
+
+        assert_eq!(model.volume_warning_label, None);
     }
 }

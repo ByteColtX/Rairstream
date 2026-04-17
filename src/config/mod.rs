@@ -11,6 +11,7 @@ use thiserror::Error;
 const CONFIG_DIR_NAME: &str = "Rairstream";
 const CONFIG_FILE_NAME: &str = "config.json";
 const DEFAULT_SENDER_VOLUME_PERCENT: u8 = 100;
+pub const MAX_SENDER_VOLUME_PERCENT: u8 = 200;
 
 /// 已保存接收端凭据对应的认证恢复路径。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -38,7 +39,11 @@ where
 }
 
 const fn clamp_sender_volume_percent(percent: u8) -> u8 {
-    if percent > 100 { 100 } else { percent }
+    if percent > MAX_SENDER_VOLUME_PERCENT {
+        MAX_SENDER_VOLUME_PERCENT
+    } else {
+        percent
+    }
 }
 
 /// `AirPlay` Receiver 接收端配对记录所需的长期身份材料。
@@ -285,7 +290,7 @@ mod tests {
 
         config.set_sender_volume_percent(255);
 
-        assert_eq!(config.sender_volume_percent, 100);
+        assert_eq!(config.sender_volume_percent, 200);
     }
 
     #[test]

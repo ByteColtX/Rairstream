@@ -252,7 +252,20 @@ fn test_config_rejects_invalid_preferred_device_type() {
 }
 
 #[test]
-fn test_config_clamps_sender_volume_percent_on_load() {
+fn test_config_deserializes_boosted_sender_volume_200() {
+    let config: AppConfig = serde_json::from_value(json!({
+        "auto_reconnect": true,
+        "preferred_device_id": null,
+        "sender_volume_percent": 200,
+        "paired_receivers": {}
+    }))
+    .expect("config should deserialize boosted sender volume percent");
+
+    assert_eq!(config.sender_volume_percent, 200);
+}
+
+#[test]
+fn test_config_clamps_sender_volume_percent_on_load_to_200() {
     let config: AppConfig = serde_json::from_value(json!({
         "auto_reconnect": true,
         "preferred_device_id": null,
@@ -261,5 +274,31 @@ fn test_config_clamps_sender_volume_percent_on_load() {
     }))
     .expect("config should deserialize and clamp sender volume percent");
 
-    assert_eq!(config.sender_volume_percent, 100);
+    assert_eq!(config.sender_volume_percent, 200);
+}
+
+#[test]
+fn test_config_round_trip_preserves_boosted_sender_volume_125() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "rairstream-config-sender-volume-round-trip-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos()
+    ));
+    let path = temp_dir.join("config.json");
+    let config = AppConfig {
+        sender_volume_percent: 125,
+        ..AppConfig::default()
+    };
+
+    config
+        .save_to_path(&path)
+        .expect("config should save boosted sender volume");
+    let loaded = AppConfig::load_from_path(&path).expect("config should load from temp path");
+
+    assert_eq!(loaded.sender_volume_percent, 125);
+
+    std::fs::remove_file(&path).expect("temp config file should be removable");
+    std::fs::remove_dir(&temp_dir).expect("temp config dir should be removable");
 }

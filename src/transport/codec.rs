@@ -3,6 +3,7 @@ use std::mem;
 use num_traits::ToPrimitive;
 
 use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
+use crate::config::MAX_SENDER_VOLUME_PERCENT;
 
 use super::{
     AirPlayError, RAOP_BITS_PER_SAMPLE, RAOP_CHANNELS, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
@@ -49,7 +50,7 @@ impl AudioResampler {
     }
 
     pub fn set_sender_volume_percent(&mut self, percent: u8) {
-        self.sender_volume_gain = f64::from(percent.min(100)) / 100.0;
+        self.sender_volume_gain = f64::from(percent.min(MAX_SENDER_VOLUME_PERCENT)) / 100.0;
     }
 
     pub fn push_chunk(&mut self, chunk: &AudioChunk) -> Result<Vec<Vec<u8>>, AirPlayError> {
@@ -259,11 +260,24 @@ fn encode_pcm_packet(frames: &[[f64; 2]]) -> Vec<u8> {
     );
 
     for frame in frames {
-        bytes.extend_from_slice(&quantize_sample(frame[0]).to_be_bytes());
-        bytes.extend_from_slice(&quantize_sample(frame[1]).to_be_bytes());
+        bytes.extend_from_slice(&quantize_sample(protect_peak(frame[0])).to_be_bytes());
+        bytes.extend_from_slice(&quantize_sample(protect_peak(frame[1])).to_be_bytes());
     }
 
     bytes
+}
+
+fn protect_peak(sample: f64) -> f64 {
+    let magnitude = sample.abs();
+    if magnitude <= 1.0 {
+        return sample;
+    }
+
+    let excess = magnitude - 1.0;
+    let soft_limited = excess / (1.0 + excess);
+    let quantize_floor = (f64::from(i16::MAX) - 256.0) / f64::from(i16::MAX);
+    let protected = 1.0 - (1.0 - quantize_floor) * soft_limited;
+    sample.signum() * protected
 }
 
 fn quantize_sample(sample: f64) -> i16 {
@@ -280,10 +294,11 @@ fn quantize_sample(sample: f64) -> i16 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioResampler, CodecDescription, decode_and_downmix, encode_pcm_packet,
+        AudioResampler, CodecDescription, decode_and_downmix, encode_pcm_packet, protect_peak,
         validate_input_format,
     };
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
+    use crate::config::MAX_SENDER_VOLUME_PERCENT;
     use crate::transport::AirPlayError;
 
     #[test]
@@ -660,11 +675,11 @@ mod tests {
     }
 
     #[test]
-    fn resampler_caps_sender_volume_above_hundred_percent() {
+    fn resampler_makes_moderate_samples_louder_above_hundred_percent() {
         let format = AudioFormat::default();
         let mut full_resampler = AudioResampler::new(format);
-        let mut capped_resampler = AudioResampler::new(format);
-        capped_resampler.set_sender_volume_percent(150);
+        let mut boosted_resampler = AudioResampler::new(format);
+        boosted_resampler.set_sender_volume_percent(125);
         let mut bytes = Vec::new();
         for _ in 0..352 {
             bytes.extend_from_slice(&10_000_i16.to_le_bytes());
@@ -673,9 +688,98 @@ mod tests {
         let chunk = AudioChunk::new(format, bytes).unwrap();
 
         let full_packets = full_resampler.push_chunk(&chunk).unwrap();
-        let capped_packets = capped_resampler.push_chunk(&chunk).unwrap();
+        let boosted_packets = boosted_resampler.push_chunk(&chunk).unwrap();
+        let full_left = i16::from_be_bytes([full_packets[0][0], full_packets[0][1]]);
+        let boosted_left = i16::from_be_bytes([boosted_packets[0][0], boosted_packets[0][1]]);
 
-        assert_eq!(capped_packets, full_packets);
+        assert!(boosted_left.abs() > full_left.abs());
+    }
+
+    #[test]
+    fn protect_peak_keeps_unity_and_full_scale_samples_transparent() {
+        assert!((protect_peak(0.5) - 0.5).abs() < f64::EPSILON);
+        assert!((protect_peak(1.0) - 1.0).abs() < f64::EPSILON);
+        assert!((protect_peak(-1.0) - (-1.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resampler_keeps_full_scale_samples_transparent_at_hundred_percent() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::new(format);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&i16::MAX.to_le_bytes());
+            bytes.extend_from_slice(&(-i16::MAX).to_le_bytes());
+        }
+
+        let packets = resampler
+            .push_chunk(&AudioChunk::new(format, bytes).unwrap())
+            .unwrap();
+        let left = i16::from_be_bytes([packets[0][0], packets[0][1]]);
+        let right = i16::from_be_bytes([packets[0][2], packets[0][3]]);
+
+        assert_eq!(left, i16::MAX);
+        assert_eq!(right, -i16::MAX);
+    }
+
+    #[test]
+    fn protect_peak_stays_continuous_just_above_unity() {
+        let at_unity = protect_peak(1.0);
+        let just_above = protect_peak(1.0 + 1.0e-6);
+        let slightly_above = protect_peak(1.001);
+
+        assert!((at_unity - 1.0).abs() < f64::EPSILON);
+        assert!(just_above < at_unity);
+        assert!(at_unity - just_above < 1.0e-4);
+        assert!(slightly_above < 1.0);
+        assert!(slightly_above <= just_above);
+        assert!(protect_peak(-(1.0 + 1.0e-6)) > -1.0);
+        assert!(protect_peak(-(1.0 + 1.0e-6)) < 0.0);
+    }
+
+    #[test]
+    fn protect_peak_maps_over_full_scale_samples_monotonically_below_full_scale() {
+        let mild = protect_peak(1.01);
+        let medium = protect_peak(1.2);
+        let hot = protect_peak(1.8);
+
+        assert!(mild < 1.0);
+        assert!(hot < 1.0);
+        assert!(mild > medium);
+        assert!(medium > hot);
+        assert!(protect_peak(-1.01) > -1.0);
+        assert!(protect_peak(-1.01) < 0.0);
+        assert!(protect_peak(-1.01) < protect_peak(-1.2));
+    }
+
+    #[test]
+    fn resampler_preserves_distinction_between_boosted_over_full_scale_samples() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::new(format);
+        resampler.set_sender_volume_percent(MAX_SENDER_VOLUME_PERCENT);
+        let mut bytes = Vec::new();
+        for index in 0..352 {
+            let sample = match index % 3 {
+                0 => 20_000_i16,
+                1 => 24_000_i16,
+                _ => 30_000_i16,
+            };
+            bytes.extend_from_slice(&sample.to_le_bytes());
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+        let first_packet = &packets[0];
+        let first = i16::from_be_bytes([first_packet[0], first_packet[1]]);
+        let second = i16::from_be_bytes([first_packet[4], first_packet[5]]);
+        let third = i16::from_be_bytes([first_packet[8], first_packet[9]]);
+
+        assert!(first > 0);
+        assert!(second < i16::MAX);
+        assert!(third < i16::MAX);
+        assert!(first > second);
+        assert!(second > third);
     }
 
     #[test]

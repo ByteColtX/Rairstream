@@ -147,6 +147,22 @@ fn test_set_sender_volume_updates_state_without_active_stream() {
 }
 
 #[test]
+fn test_set_sender_volume_exposes_boosted_warning_through_controller_and_model() {
+    let coordinator = SessionCoordinator::new(StubDiscoveryService);
+    let mut controller = TrayController::new(coordinator, AppConfig::default());
+
+    let model = controller.set_sender_volume(200).unwrap();
+
+    assert_eq!(controller.state().sender_volume_percent, 200);
+    assert_eq!(model.volume_items[7].percent, 200);
+    assert!(model.volume_items[7].selected);
+    assert_eq!(
+        model.volume_warning_label.as_deref(),
+        Some("音量已提升超过 100%，高电平时可能出现失真")
+    );
+}
+
+#[test]
 fn test_toggle_sender_mute_updates_state_without_active_stream() {
     let coordinator = SessionCoordinator::new(StubDiscoveryService);
     let mut controller = TrayController::new(coordinator, AppConfig::default());

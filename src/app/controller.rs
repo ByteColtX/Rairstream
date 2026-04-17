@@ -1,5 +1,5 @@
 use super::{AppState, RairstreamError, SessionCoordinator, SessionState, SpeakerDevice, platform};
-use crate::config::{AppConfig, ReceiverCredentials};
+use crate::config::{AppConfig, MAX_SENDER_VOLUME_PERCENT, ReceiverCredentials};
 use crate::discovery::DiscoveryService;
 use tracing::{debug, info, warn};
 
@@ -316,7 +316,7 @@ where
     }
 
     pub fn set_sender_volume(&mut self, percent: u8) -> Result<(), RairstreamError> {
-        let percent = percent.min(100);
+        let percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
         self.config.set_sender_volume_percent(percent);
         self.config.save()?;
         self.sender_volume_percent = self.config.sender_volume_percent;
@@ -940,6 +940,54 @@ mod tests {
                 .lock()
                 .expect("lock sender volume"),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn set_sender_volume_preserves_boosted_value_when_not_streaming() {
+        let mut controller = AppController::new(
+            StubSessionService {
+                devices: vec![build_device("receiver", "Receiver", "192.168.1.10")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
+                stored_credentials: Arc::new(Mutex::new(Vec::new())),
+                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+            },
+            AppConfig::default(),
+        );
+
+        controller
+            .set_sender_volume(125)
+            .expect("boosted volume should be accepted");
+
+        assert_eq!(controller.sender_volume_percent(), 125);
+        assert_eq!(controller.effective_sender_volume_percent(), 125);
+    }
+
+    #[test]
+    fn set_sender_volume_pushes_boosted_value_to_runtime_when_streaming() {
+        let service = StubSessionService {
+            devices: vec![build_device("receiver", "Receiver", "192.168.1.10")],
+            start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+            stored_credentials: Arc::new(Mutex::new(Vec::new())),
+            last_sender_volume_percent: Arc::new(Mutex::new(None)),
+        };
+        let last_sender_volume_percent = Arc::clone(&service.last_sender_volume_percent);
+        let mut controller = AppController::new(service, AppConfig::default());
+        controller.refresh_devices();
+        controller
+            .select_device("receiver")
+            .expect("stream should start");
+
+        controller
+            .set_sender_volume(125)
+            .expect("boosted volume should update runtime");
+
+        assert_eq!(controller.sender_volume_percent(), 125);
+        assert_eq!(
+            *last_sender_volume_percent
+                .lock()
+                .expect("lock sender volume"),
+            Some(125)
         );
     }
 
