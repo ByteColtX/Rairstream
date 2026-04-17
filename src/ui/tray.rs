@@ -36,6 +36,10 @@ struct TrayMenuState {
     action_map: HashMap<MenuId, TrayAction>,
 }
 
+const fn show_menu_on_left_click() -> bool {
+    false
+}
+
 impl TrayMenuState {
     fn new(
         model: &TrayMenuModel,
@@ -90,7 +94,7 @@ where
     let tray_icon = TrayIconBuilder::new()
         .with_tooltip(initial_model.status_label.clone())
         .with_menu(Box::new(menu_state.menu.clone()))
-        .with_menu_on_left_click(true)
+        .with_menu_on_left_click(show_menu_on_left_click())
         .with_icon(icon)
         .build()
         .map_err(|error| TrayUiError::CreateTrayIcon {
@@ -122,6 +126,8 @@ where
                     {
                         error!(error = %error, "打开托盘时同步菜单状态失败，准备退出事件循环");
                         *control_flow = ControlFlow::ExitWithCode(1);
+                    } else {
+                        tray_icon.show_menu();
                     }
                 }
                 UserEvent::Tray(_) => {}
@@ -495,7 +501,12 @@ fn build_icon() -> Result<Icon, TrayUiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::format_about_message;
+    use super::{format_about_message, show_menu_on_left_click};
+
+    #[test]
+    fn test_show_menu_on_left_click_is_disabled_for_manual_sync() {
+        assert!(!show_menu_on_left_click());
+    }
 
     #[test]
     fn test_format_about_message_contains_version_and_commit() {
