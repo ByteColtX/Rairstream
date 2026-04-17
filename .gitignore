@@ -22,3 +22,4 @@ target
 
 # Claude Code 本地配置与会话产物
 .claude/
+.worktrees/
