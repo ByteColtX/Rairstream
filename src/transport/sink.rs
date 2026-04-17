@@ -16,6 +16,7 @@ const RAOP_AUDIO_PAYLOAD_TYPE: u8 = 96;
 pub struct RaopSinkConfig {
     pub frames_per_packet: usize,
     pub sync_interval_packets: usize,
+    pub sender_volume_percent: u16,
 }
 
 impl Default for RaopSinkConfig {
@@ -23,6 +24,7 @@ impl Default for RaopSinkConfig {
         Self {
             frames_per_packet: RAOP_FRAMES_PER_PACKET,
             sync_interval_packets: 125,
+            sender_volume_percent: 100,
         }
     }
 }
@@ -30,7 +32,7 @@ impl Default for RaopSinkConfig {
 #[derive(Debug)]
 pub struct RaopAudioSink {
     resampler: AudioResampler,
-    sender_volume_percent: Arc<Mutex<u8>>,
+    sender_volume_percent: Arc<Mutex<u16>>,
     transport: RaopStreamTransport,
     first_packet_in_stream: bool,
     sent_audio_packets: usize,
@@ -41,7 +43,7 @@ impl RaopAudioSink {
     pub fn new(
         source_format: crate::audio::AudioFormat,
         transport: RaopStreamTransport,
-        sender_volume_percent: Arc<Mutex<u8>>,
+        sender_volume_percent: Arc<Mutex<u16>>,
     ) -> Self {
         debug!(
             sample_rate_hz = source_format.sample_rate_hz,
@@ -234,6 +236,7 @@ mod tests {
 
         assert_eq!(config.frames_per_packet, 352);
         assert_eq!(config.sync_interval_packets, 125);
+        assert_eq!(config.sender_volume_percent, 100);
     }
 
     #[test]
@@ -256,6 +259,7 @@ mod tests {
             sink_config: RaopSinkConfig {
                 frames_per_packet: 352,
                 sync_interval_packets: 1,
+                sender_volume_percent: 100,
             },
         };
         let format = AudioFormat {

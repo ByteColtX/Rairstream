@@ -85,7 +85,7 @@ where
         Ok(self.menu_model())
     }
 
-    pub fn set_sender_volume(&mut self, percent: u8) -> Result<TrayMenuModel, RairstreamError> {
+    pub fn set_sender_volume(&mut self, percent: u16) -> Result<TrayMenuModel, RairstreamError> {
         self.controller.set_sender_volume(percent)?;
         Ok(self.menu_model())
     }
@@ -130,7 +130,7 @@ mod tests {
         devices: Vec<SpeakerDevice>,
         start_behavior: Arc<Mutex<StartBehavior>>,
         pair_behavior: PairBehavior,
-        last_sender_volume_percent: Arc<Mutex<Option<u8>>>,
+        sender_volume_percent: Arc<Mutex<Option<u16>>>,
     }
 
     impl SessionControlService for StubSessionService {
@@ -236,9 +236,8 @@ mod tests {
             })
         }
 
-        fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
-            let mut last_sender_volume_percent = self.last_sender_volume_percent.lock().unwrap();
-            *last_sender_volume_percent = Some(percent);
+        fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError> {
+            *self.sender_volume_percent.lock().unwrap() = Some(percent);
             Ok(())
         }
     }
@@ -264,7 +263,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -284,7 +283,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 auto_reconnect: true,
@@ -309,7 +308,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 auto_reconnect: true,
@@ -334,7 +333,7 @@ mod tests {
                 devices: vec![build_device("living-room", "Living Room")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig {
                 auto_reconnect: false,
@@ -353,21 +352,55 @@ mod tests {
     }
 
     #[test]
+    fn test_set_sender_volume_300_and_400_updates_runtime_state() {
+        let sender_volume_percent = Arc::new(Mutex::new(None));
+        let mut controller = TrayController::new(
+            StubSessionService {
+                devices: vec![build_device("bedroom", "Bedroom")],
+                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
+                pair_behavior: PairBehavior::Success,
+                sender_volume_percent: Arc::clone(&sender_volume_percent),
+            },
+            AppConfig::default(),
+        );
+        controller.refresh_devices();
+        controller.select_device("bedroom").unwrap();
+
+        let model_300 = controller.set_sender_volume(300).unwrap();
+        assert_eq!(controller.state().sender_volume_percent, 300);
+        assert_eq!(*sender_volume_percent.lock().unwrap(), Some(300));
+        assert!(
+            model_300
+                .volume_items
+                .iter()
+                .any(|item| item.percent == 300 && item.selected)
+        );
+
+        let model_400 = controller.set_sender_volume(400).unwrap();
+        assert_eq!(controller.state().sender_volume_percent, 400);
+        assert_eq!(*sender_volume_percent.lock().unwrap(), Some(400));
+        assert!(
+            model_400
+                .volume_items
+                .iter()
+                .any(|item| item.percent == 400 && item.selected)
+        );
+    }
+
+    #[test]
     fn test_select_device_enters_streaming_state() {
         let mut controller = TrayController::new(
             StubSessionService {
                 devices: vec![build_device("bedroom", "Bedroom")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
 
         controller.refresh_devices();
-        let model = controller
-            .select_device("bedroom")
-            .expect("stub selection should succeed");
+        let model = controller.select_device("bedroom").unwrap();
 
         assert_eq!(model.status_label, "Rairstream：正在串流 Bedroom");
         assert_eq!(
@@ -387,14 +420,12 @@ mod tests {
                 devices: vec![build_device("bedroom", "Bedroom")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
         pairing_controller.refresh_devices();
-        let pairing_model = pairing_controller
-            .select_device("bedroom")
-            .expect("stub pairing selection should succeed");
+        let pairing_model = pairing_controller.select_device("bedroom").unwrap();
         assert_eq!(pairing_model.status_label, "Rairstream：等待配对 Bedroom");
         assert!(matches!(
             pairing_controller.state().app_state.active_session,
@@ -406,14 +437,12 @@ mod tests {
                 devices: vec![build_device("den", "Den")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Authenticating)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
         auth_controller.refresh_devices();
-        let auth_model = auth_controller
-            .select_device("den")
-            .expect("stub auth selection should succeed");
+        let auth_model = auth_controller.select_device("den").unwrap();
         assert_eq!(auth_model.status_label, "Rairstream：正在认证 Den");
         assert!(matches!(
             auth_controller.state().app_state.active_session,
@@ -428,7 +457,7 @@ mod tests {
                 devices: vec![build_device("studio", "Studio")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
@@ -449,15 +478,14 @@ mod tests {
                 devices: vec![build_device("receiver", "Receiver")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
 
         controller.refresh_devices();
-        controller
-            .submit_pairing_pin("receiver", "123456")
-            .expect("pairing should succeed");
+        controller.select_device("receiver").unwrap();
+        controller.submit_pairing_pin("receiver", "123456").unwrap();
 
         assert!(matches!(
             controller.state().app_state.active_session,
@@ -472,12 +500,13 @@ mod tests {
                 devices: vec![build_device("receiver", "Receiver")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::AwaitingPairing)),
                 pair_behavior: PairBehavior::Failure,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
 
         controller.refresh_devices();
+        controller.select_device("receiver").unwrap();
         let result = controller.submit_pairing_pin("receiver", "123456");
 
         assert!(matches!(
@@ -495,42 +524,16 @@ mod tests {
                 devices: vec![build_device("receiver", "Receiver")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );
         controller.refresh_devices();
-        controller
-            .select_device("receiver")
-            .expect("streaming should start");
+        controller.select_device("receiver").unwrap();
 
-        let model = controller.stop_streaming().expect("stop should succeed");
+        let model = controller.stop_streaming().unwrap();
 
         assert_eq!(model.status_label, "Rairstream：已选择 Receiver");
-    }
-
-    #[test]
-    fn test_set_sender_volume_updates_runtime_when_streaming() {
-        let runtime_volume = Arc::new(Mutex::new(None));
-        let mut controller = TrayController::new(
-            StubSessionService {
-                devices: vec![build_device("receiver", "Receiver")],
-                start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
-                pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::clone(&runtime_volume),
-            },
-            AppConfig::default(),
-        );
-        controller.refresh_devices();
-        controller
-            .select_device("receiver")
-            .expect("streaming should start");
-
-        controller
-            .set_sender_volume(50)
-            .expect("volume update should succeed");
-
-        assert_eq!(*runtime_volume.lock().unwrap(), Some(50));
     }
 
     #[test]
@@ -541,7 +544,7 @@ mod tests {
                 devices: vec![build_device("receiver", "Receiver")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Success)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::clone(&runtime_volume),
+                sender_volume_percent: Arc::clone(&runtime_volume),
             },
             AppConfig {
                 sender_volume_percent: 75,
@@ -549,13 +552,9 @@ mod tests {
             },
         );
         controller.refresh_devices();
-        controller
-            .select_device("receiver")
-            .expect("streaming should start");
+        controller.select_device("receiver").unwrap();
 
-        controller
-            .toggle_sender_mute()
-            .expect("mute toggle should succeed");
+        controller.toggle_sender_mute().unwrap();
 
         assert_eq!(*runtime_volume.lock().unwrap(), Some(0));
     }
@@ -567,7 +566,7 @@ mod tests {
                 devices: vec![build_device("receiver", "Receiver")],
                 start_behavior: Arc::new(Mutex::new(StartBehavior::Failure)),
                 pair_behavior: PairBehavior::Success,
-                last_sender_volume_percent: Arc::new(Mutex::new(None)),
+                sender_volume_percent: Arc::new(Mutex::new(None)),
             },
             AppConfig::default(),
         );

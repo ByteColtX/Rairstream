@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use rairstream::app::SessionState;
 use rairstream::app::{RairstreamError, SessionCoordinator};
 use rairstream::config::AppConfig;
 use rairstream::discovery::StubDiscoveryService;

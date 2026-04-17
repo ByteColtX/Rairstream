@@ -265,16 +265,16 @@ fn test_config_deserializes_boosted_sender_volume_200() {
 }
 
 #[test]
-fn test_config_clamps_sender_volume_percent_on_load_to_200() {
+fn test_config_preserves_sender_volume_percent_within_400_limit() {
     let config: AppConfig = serde_json::from_value(json!({
         "auto_reconnect": true,
         "preferred_device_id": null,
         "sender_volume_percent": 255,
         "paired_receivers": {}
     }))
-    .expect("config should deserialize and clamp sender volume percent");
+    .expect("config should deserialize sender volume percent within supported range");
 
-    assert_eq!(config.sender_volume_percent, 200);
+    assert_eq!(config.sender_volume_percent, 255);
 }
 
 #[test]

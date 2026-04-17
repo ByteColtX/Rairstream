@@ -593,6 +593,7 @@ impl RaopSession {
             descriptor: descriptor.clone(),
             sink_config: RaopSinkConfig {
                 frames_per_packet: descriptor.frames_per_packet,
+                sender_volume_percent: descriptor.sender_volume_percent,
                 ..RaopSinkConfig::default()
             },
             codec: CodecDescription::pcm_stereo(),
@@ -2308,6 +2309,28 @@ mod tests {
 
         assert_eq!(session.state(), RaopSessionState::Connecting);
         assert_eq!(session.sink_config().frames_per_packet, 352);
+        assert_eq!(session.sink_config().sender_volume_percent, 100);
+    }
+
+    #[test]
+    fn connect_preserves_sender_volume_percent_in_sink_config() {
+        let mut descriptor = build_descriptor(AudioFormat::default());
+        descriptor.sender_volume_percent = 400;
+
+        let session = RaopSession::connect(&descriptor).unwrap();
+
+        assert_eq!(session.sink_config().sender_volume_percent, 400);
+    }
+
+    #[test]
+    fn connect_rejects_out_of_range_sender_volume_percent() {
+        let mut descriptor = build_descriptor(AudioFormat::default());
+        descriptor.sender_volume_percent = 401;
+
+        assert!(matches!(
+            RaopSession::connect(&descriptor).unwrap_err(),
+            AirPlayError::InvalidSession { .. }
+        ));
     }
 
     #[test]

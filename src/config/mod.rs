@@ -10,8 +10,8 @@ use thiserror::Error;
 
 const CONFIG_DIR_NAME: &str = "Rairstream";
 const CONFIG_FILE_NAME: &str = "config.json";
-const DEFAULT_SENDER_VOLUME_PERCENT: u8 = 100;
-pub const MAX_SENDER_VOLUME_PERCENT: u8 = 200;
+const DEFAULT_SENDER_VOLUME_PERCENT: u16 = 100;
+pub const MAX_SENDER_VOLUME_PERCENT: u16 = 400;
 
 /// 已保存接收端凭据对应的认证恢复路径。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -26,19 +26,19 @@ fn is_default_receiver_auth_flow(flow: &ReceiverAuthFlow) -> bool {
     *flow == ReceiverAuthFlow::Modern
 }
 
-const fn default_sender_volume_percent() -> u8 {
+const fn default_sender_volume_percent() -> u16 {
     DEFAULT_SENDER_VOLUME_PERCENT
 }
 
-fn deserialize_sender_volume_percent<'de, D>(deserializer: D) -> Result<u8, D::Error>
+fn deserialize_sender_volume_percent<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let percent = u8::deserialize(deserializer)?;
+    let percent = u16::deserialize(deserializer)?;
     Ok(clamp_sender_volume_percent(percent))
 }
 
-const fn clamp_sender_volume_percent(percent: u8) -> u8 {
+const fn clamp_sender_volume_percent(percent: u16) -> u16 {
     if percent > MAX_SENDER_VOLUME_PERCENT {
         MAX_SENDER_VOLUME_PERCENT
     } else {
@@ -69,7 +69,7 @@ pub struct AppConfig {
         default = "default_sender_volume_percent",
         deserialize_with = "deserialize_sender_volume_percent"
     )]
-    pub sender_volume_percent: u8,
+    pub sender_volume_percent: u16,
     #[serde(default)]
     pub sender_muted: bool,
     #[serde(default)]
@@ -167,7 +167,7 @@ impl AppConfig {
         self.launch_at_startup = enabled;
     }
 
-    pub fn set_sender_volume_percent(&mut self, percent: u8) {
+    pub fn set_sender_volume_percent(&mut self, percent: u16) {
         self.sender_volume_percent = clamp_sender_volume_percent(percent);
     }
 
@@ -288,9 +288,9 @@ mod tests {
     fn set_sender_volume_percent_clamps_out_of_range_values() {
         let mut config = AppConfig::default();
 
-        config.set_sender_volume_percent(255);
+        config.set_sender_volume_percent(401);
 
-        assert_eq!(config.sender_volume_percent, 200);
+        assert_eq!(config.sender_volume_percent, 400);
     }
 
     #[test]

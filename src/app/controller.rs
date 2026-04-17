@@ -22,7 +22,7 @@ pub trait SessionControlService {
         &self,
         selected_device_id: Option<String>,
     ) -> Result<AppState, RairstreamError>;
-    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError>;
+    fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError>;
 }
 
 impl<D> SessionControlService for SessionCoordinator<D>
@@ -68,7 +68,7 @@ where
         SessionCoordinator::reconcile_app_state(self, selected_device_id)
     }
 
-    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+    fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError> {
         SessionCoordinator::set_sender_volume_percent(self, percent)
     }
 }
@@ -79,7 +79,7 @@ pub struct AppController<S> {
     config: AppConfig,
     app_state: AppState,
     devices: Vec<SpeakerDevice>,
-    sender_volume_percent: u8,
+    sender_volume_percent: u16,
     sender_muted: bool,
     last_error: Option<String>,
 }
@@ -132,7 +132,7 @@ where
     }
 
     #[must_use]
-    pub fn sender_volume_percent(&self) -> u8 {
+    pub fn sender_volume_percent(&self) -> u16 {
         self.sender_volume_percent
     }
 
@@ -315,7 +315,7 @@ where
         Ok(())
     }
 
-    pub fn set_sender_volume(&mut self, percent: u8) -> Result<(), RairstreamError> {
+    pub fn set_sender_volume(&mut self, percent: u16) -> Result<(), RairstreamError> {
         let percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
         self.config.set_sender_volume_percent(percent);
         self.config.save()?;
@@ -351,7 +351,7 @@ where
     }
 
     #[must_use]
-    pub fn effective_sender_volume_percent(&self) -> u8 {
+    pub fn effective_sender_volume_percent(&self) -> u16 {
         if self.sender_muted {
             0
         } else {
@@ -516,7 +516,7 @@ mod tests {
         devices: Vec<SpeakerDevice>,
         start_behavior: Arc<Mutex<StartBehavior>>,
         stored_credentials: Arc<Mutex<Vec<String>>>,
-        last_sender_volume_percent: Arc<Mutex<Option<u8>>>,
+        last_sender_volume_percent: Arc<Mutex<Option<u16>>>,
     }
 
     impl SessionControlService for StubSessionService {
@@ -621,7 +621,7 @@ mod tests {
             )
         }
 
-        fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+        fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError> {
             *self
                 .last_sender_volume_percent
                 .lock()

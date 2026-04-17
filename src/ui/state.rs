@@ -6,7 +6,7 @@ pub struct TrayAppState {
     pub devices: Vec<SpeakerDevice>,
     pub auto_reconnect: bool,
     pub launch_at_startup: bool,
-    pub sender_volume_percent: u8,
+    pub sender_volume_percent: u16,
     pub sender_muted: bool,
     pub last_error: Option<String>,
 }
@@ -35,7 +35,7 @@ pub struct TrayDeviceMenuItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayVolumeMenuItem {
-    pub percent: u8,
+    pub percent: u16,
     pub label: String,
     pub selected: bool,
 }
@@ -96,8 +96,8 @@ fn build_toggle_label(title: &str, enabled: bool) -> String {
     }
 }
 
-fn build_volume_menu_items(selected_percent: u8) -> Vec<TrayVolumeMenuItem> {
-    [0_u8, 25, 50, 75, 100, 125, 150, 200]
+fn build_volume_menu_items(selected_percent: u16) -> Vec<TrayVolumeMenuItem> {
+    [0_u16, 25, 50, 75, 100, 125, 150, 200, 300, 400]
         .into_iter()
         .map(|percent| TrayVolumeMenuItem {
             percent,
@@ -219,14 +219,14 @@ mod tests {
         assert!(model.refresh_enabled);
         assert_eq!(model.auto_reconnect_label, "自动重连：开");
         assert_eq!(model.launch_at_startup_label, "开机启动：关");
-        assert_eq!(model.volume_items.len(), 8);
+        assert_eq!(model.volume_items.len(), 10);
         assert_eq!(
             model
                 .volume_items
                 .iter()
                 .map(|item| item.percent)
                 .collect::<Vec<_>>(),
-            vec![0, 25, 50, 75, 100, 125, 150, 200]
+            vec![0, 25, 50, 75, 100, 125, 150, 200, 300, 400]
         );
         assert!(model.volume_items[4].selected);
         assert_eq!(model.volume_warning_label, None);
@@ -387,7 +387,7 @@ mod tests {
 
         let model = build_tray_menu_model(&state);
 
-        assert_eq!(model.volume_items.len(), 8);
+        assert_eq!(model.volume_items.len(), 10);
         assert_eq!(model.volume_items[2].percent, 50);
         assert!(model.volume_items[2].selected);
         assert_eq!(model.volume_items[2].label, "● 50%");
@@ -407,6 +407,12 @@ mod tests {
         assert_eq!(model.volume_items[7].percent, 200);
         assert_eq!(model.volume_items[7].label, "200%");
         assert!(!model.volume_items[7].selected);
+        assert_eq!(model.volume_items[8].percent, 300);
+        assert_eq!(model.volume_items[8].label, "300%");
+        assert!(!model.volume_items[8].selected);
+        assert_eq!(model.volume_items[9].percent, 400);
+        assert_eq!(model.volume_items[9].label, "400%");
+        assert!(!model.volume_items[9].selected);
     }
 
     #[test]

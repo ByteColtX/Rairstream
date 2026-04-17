@@ -40,16 +40,26 @@ pub struct AudioResampler {
 impl AudioResampler {
     #[must_use]
     pub fn new(source_format: AudioFormat) -> Self {
-        Self {
+        Self::with_sender_volume_percent(source_format, 100)
+    }
+
+    #[must_use]
+    pub fn with_sender_volume_percent(
+        source_format: AudioFormat,
+        sender_volume_percent: u16,
+    ) -> Self {
+        let mut resampler = Self {
             source_format,
             sender_volume_gain: 1.0,
             phase_numerator: 0,
             pending_input_frames: Vec::new(),
             pending_output_frames: Vec::new(),
-        }
+        };
+        resampler.set_sender_volume_percent(sender_volume_percent);
+        resampler
     }
 
-    pub fn set_sender_volume_percent(&mut self, percent: u8) {
+    pub fn set_sender_volume_percent(&mut self, percent: u16) {
         self.sender_volume_gain = f64::from(percent.min(MAX_SENDER_VOLUME_PERCENT)) / 100.0;
     }
 
@@ -153,6 +163,13 @@ fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError>
     Ok(frames)
 }
 
+fn apply_gain(frames: &mut [[f64; 2]], gain_multiplier: f64) {
+    for frame in frames {
+        frame[0] *= gain_multiplier;
+        frame[1] *= gain_multiplier;
+    }
+}
+
 fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError> {
     match (format.sample_type, format.bits_per_sample) {
         (AudioSampleType::Float, 32) => {
@@ -185,13 +202,6 @@ fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError>
                 format.sample_type, format.bits_per_sample
             ),
         }),
-    }
-}
-
-fn apply_gain(frames: &mut [[f64; 2]], gain: f64) {
-    for frame in frames {
-        frame[0] *= gain;
-        frame[1] *= gain;
     }
 }
 
@@ -789,5 +799,45 @@ mod tests {
         assert_eq!(bytes.len(), 4);
         assert!(bytes[0] != 0 || bytes[1] != 0);
         assert!(bytes[2] != 0 || bytes[3] != 0);
+    }
+
+    #[test]
+    fn resampler_can_represent_sender_volume_boost_up_to_400_percent() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::with_sender_volume_percent(format, 400);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&1000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-1000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert_eq!(&packets[0][0..2], &(4000_i16).to_be_bytes());
+        assert_eq!(&packets[0][2..4], &(-4000_i16).to_be_bytes());
+    }
+
+    #[test]
+    fn resampler_clamps_boosted_samples_to_pcm_range() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::with_sender_volume_percent(format, 400);
+        let mut bytes = Vec::new();
+        for _ in 0..352 {
+            bytes.extend_from_slice(&30000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-30000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+        let left = i16::from_be_bytes([packets[0][0], packets[0][1]]);
+        let right = i16::from_be_bytes([packets[0][2], packets[0][3]]);
+
+        assert_eq!(packets.len(), 1);
+        assert!(left > 30000);
+        assert!(left < i16::MAX);
+        assert!(right < -30000);
+        assert!(right > i16::MIN);
     }
 }

@@ -40,6 +40,7 @@ pub struct SessionDescriptor {
     pub device: SpeakerDevice,
     pub input_format: AudioFormat,
     pub frames_per_packet: usize,
+    pub sender_volume_percent: u16,
     pub receiver_credentials: Option<ReceiverCredentials>,
 }
 
@@ -50,6 +51,7 @@ impl SessionDescriptor {
             device,
             input_format,
             frames_per_packet: RAOP_FRAMES_PER_PACKET,
+            sender_volume_percent: 100,
             receiver_credentials: None,
         }
     }
@@ -94,6 +96,12 @@ impl SessionDescriptor {
         if self.frames_per_packet == 0 {
             return Err(AirPlayError::InvalidSession {
                 message: String::from("每个包的帧数必须大于 0"),
+            });
+        }
+
+        if !(100..=400).contains(&self.sender_volume_percent) {
+            return Err(AirPlayError::InvalidSession {
+                message: String::from("发送端音量百分比必须在 100 到 400 之间"),
             });
         }
 
@@ -191,6 +199,38 @@ mod tests {
         let descriptor = SessionDescriptor::new(build_device(), AudioFormat::default());
 
         assert_eq!(descriptor.frames_per_packet, RAOP_FRAMES_PER_PACKET);
+        assert_eq!(descriptor.sender_volume_percent, 100);
+    }
+
+    #[test]
+    fn session_descriptor_accepts_sender_volume_percent_up_to_400() {
+        let mut descriptor = SessionDescriptor::new(build_device(), AudioFormat::default());
+        descriptor.sender_volume_percent = 400;
+
+        descriptor.validate().unwrap();
+        assert_eq!(descriptor.sender_volume_percent, 400);
+    }
+
+    #[test]
+    fn session_descriptor_rejects_sender_volume_percent_below_100() {
+        let mut descriptor = SessionDescriptor::new(build_device(), AudioFormat::default());
+        descriptor.sender_volume_percent = 99;
+
+        assert!(matches!(
+            descriptor.validate().unwrap_err(),
+            AirPlayError::InvalidSession { .. }
+        ));
+    }
+
+    #[test]
+    fn session_descriptor_rejects_sender_volume_percent_above_400() {
+        let mut descriptor = SessionDescriptor::new(build_device(), AudioFormat::default());
+        descriptor.sender_volume_percent = 401;
+
+        assert!(matches!(
+            descriptor.validate().unwrap_err(),
+            AirPlayError::InvalidSession { .. }
+        ));
     }
 
     #[test]

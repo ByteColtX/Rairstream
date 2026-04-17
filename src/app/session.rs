@@ -38,7 +38,7 @@ struct ActiveStreamSession {
     device_id: String,
     capture: Option<RunningCapture>,
     transport: Option<PreparedConnection>,
-    sender_volume_percent: Arc<Mutex<u8>>,
+    sender_volume_percent: Arc<Mutex<u16>>,
 }
 
 impl ActiveStreamSession {
@@ -46,7 +46,7 @@ impl ActiveStreamSession {
         device_id: String,
         capture: RunningCapture,
         transport: PreparedConnection,
-        sender_volume_percent: Arc<Mutex<u8>>,
+        sender_volume_percent: Arc<Mutex<u16>>,
     ) -> Self {
         Self {
             device_id,
@@ -56,7 +56,7 @@ impl ActiveStreamSession {
         }
     }
 
-    fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
+    fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError> {
         let mut sender_volume_percent = self.sender_volume_percent.lock().map_err(|_| {
             RairstreamError::InvalidConfiguration {
                 message: String::from("发送端音量运行态锁已损坏"),
@@ -109,7 +109,7 @@ pub struct SessionCoordinator<D> {
     discovery: D,
     paired_receivers: Mutex<std::collections::HashMap<String, ReceiverCredentials>>,
     active_session: Mutex<Option<ActiveStreamSession>>,
-    sender_volume_percent: Arc<Mutex<u8>>,
+    sender_volume_percent: Arc<Mutex<u16>>,
 }
 
 impl<D> SessionCoordinator<D>
@@ -149,6 +149,29 @@ where
         devices
     }
 
+    pub fn sender_volume_percent(&self) -> Result<u16, RairstreamError> {
+        let sender_volume_percent = self.lock_sender_volume_percent()?;
+        Ok(*sender_volume_percent)
+    }
+
+    pub fn set_sender_volume_percent(&self, percent: u16) -> Result<(), RairstreamError> {
+        if percent > MAX_SENDER_VOLUME_PERCENT {
+            return Err(RairstreamError::InvalidConfiguration {
+                message: String::from("发送端音量百分比必须在 0 到 400 之间"),
+            });
+        }
+        {
+            let mut sender_volume_percent = self.lock_sender_volume_percent()?;
+            *sender_volume_percent = percent;
+        }
+
+        if let Some(active_session) = self.lock_active_session()?.as_ref() {
+            active_session.set_sender_volume_percent(percent)?;
+        }
+
+        Ok(())
+    }
+
     pub fn prepare_transport_session(
         &self,
         device: SpeakerDevice,
@@ -171,7 +194,7 @@ where
             sample_type = ?format.sample_type,
             "已获取默认回环采集格式"
         );
-        let descriptor = self.session_descriptor(&device, format);
+        let descriptor = self.session_descriptor(&device, format)?;
         let transport = PreparedTransportSession::prepare(&descriptor)?;
         debug!(
             device_id = %device.id,
@@ -210,7 +233,7 @@ where
         ensure_supported_target(device)?;
 
         let format = WindowsLoopbackCapture::preferred_format()?;
-        let descriptor = self.session_descriptor(device, format);
+        let descriptor = self.session_descriptor(device, format)?;
         let transport = PreparedTransportSession::prepare(&descriptor)?;
 
         transport.pair_with_pin(pin).map_err(Into::into)
@@ -238,7 +261,7 @@ where
             sample_type = ?format.sample_type,
             "已获取串流采集格式"
         );
-        let descriptor = self.session_descriptor(&device, format);
+        let descriptor = self.session_descriptor(&device, format)?;
         let transport = PreparedTransportSession::prepare(&descriptor)?;
         debug!(
             device_id = %device.id,
@@ -348,36 +371,18 @@ where
         })
     }
 
-    pub fn set_sender_volume_percent(&self, percent: u8) -> Result<(), RairstreamError> {
-        let percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
-        {
-            let mut sender_volume_percent = self.sender_volume_percent.lock().map_err(|_| {
-                RairstreamError::InvalidConfiguration {
-                    message: String::from("发送端音量运行态锁已损坏"),
-                }
-            })?;
-            *sender_volume_percent = percent;
-        }
-
-        if let Some(active_session) = self.lock_active_session()?.as_ref() {
-            active_session.set_sender_volume_percent(percent)?;
-        }
-
-        Ok(())
-    }
-
     fn session_descriptor(
         &self,
         device: &SpeakerDevice,
         format: crate::audio::AudioFormat,
-    ) -> SessionDescriptor {
-        let descriptor = SessionDescriptor::new(device.clone(), format);
-        match self.paired_receiver(device.id.as_str()) {
-            Ok(Some(receiver_credentials)) => {
-                descriptor.with_receiver_credentials(receiver_credentials)
-            }
-            Ok(None) | Err(_) => descriptor,
+    ) -> Result<SessionDescriptor, RairstreamError> {
+        let sender_volume_percent = self.sender_volume_percent()?;
+        let mut descriptor = SessionDescriptor::new(device.clone(), format);
+        descriptor.sender_volume_percent = sender_volume_percent;
+        if let Some(receiver_credentials) = self.paired_receiver(device.id.as_str())? {
+            descriptor = descriptor.with_receiver_credentials(receiver_credentials);
         }
+        Ok(descriptor)
     }
 
     fn paired_receiver(
@@ -421,6 +426,16 @@ where
             .lock()
             .map_err(|_| RairstreamError::InvalidConfiguration {
                 message: String::from("配对凭据运行态锁已损坏"),
+            })
+    }
+
+    fn lock_sender_volume_percent(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, u16>, RairstreamError> {
+        self.sender_volume_percent
+            .lock()
+            .map_err(|_| RairstreamError::InvalidConfiguration {
+                message: String::from("发送端音量运行态锁已损坏"),
             })
     }
 }
@@ -515,6 +530,75 @@ mod tests {
 
         assert_eq!(state.active_session, SessionState::Idle);
         assert_eq!(state.selected_device_id.as_deref(), Some("living-room"));
+    }
+
+    #[test]
+    fn coordinator_set_sender_volume_percent_updates_runtime_state() {
+        let coordinator = SessionCoordinator::new(StubDiscoveryService);
+
+        coordinator.set_sender_volume_percent(300).unwrap();
+        assert_eq!(coordinator.sender_volume_percent().unwrap(), 300);
+
+        coordinator.set_sender_volume_percent(400).unwrap();
+        assert_eq!(coordinator.sender_volume_percent().unwrap(), 400);
+    }
+
+    #[test]
+    fn coordinator_rejects_out_of_range_sender_volume_percent() {
+        let coordinator = SessionCoordinator::new(StubDiscoveryService);
+
+        let error = coordinator.set_sender_volume_percent(401).unwrap_err();
+
+        assert!(matches!(
+            error,
+            RairstreamError::InvalidConfiguration { .. }
+        ));
+    }
+
+    #[test]
+    fn coordinator_prepare_transport_session_uses_selected_sender_volume_percent() {
+        let coordinator = SessionCoordinator::new(StubDiscoveryService);
+        coordinator.set_sender_volume_percent(400).unwrap();
+        let device = coordinator.discover().remove(0);
+        let result = coordinator.prepare_transport_session(device);
+
+        if cfg!(target_os = "windows") {
+            let prepared = result.expect("windows should be supported");
+            match prepared.transport {
+                PreparedTransportSession::ClassicRaop(session) => {
+                    assert_eq!(session.sink_config().sender_volume_percent, 400);
+                }
+                PreparedTransportSession::ModernAirPlay(_) => {
+                    panic!("stub device should still use classic raop path");
+                }
+            }
+        } else {
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn session_descriptor_returns_error_when_sender_volume_lock_is_poisoned() {
+        let coordinator = SessionCoordinator::new(StubDiscoveryService);
+        let device = coordinator.discover().remove(0);
+        let format = AudioFormat {
+            sample_rate_hz: 44_100,
+            channels: 2,
+            bits_per_sample: 16,
+            sample_type: AudioSampleType::Int,
+        };
+
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = coordinator.sender_volume_percent.lock().unwrap();
+            panic!("poison sender volume lock");
+        }));
+
+        let error = coordinator.session_descriptor(&device, format).unwrap_err();
+
+        assert!(matches!(
+            error,
+            RairstreamError::InvalidConfiguration { .. }
+        ));
     }
 
     #[test]

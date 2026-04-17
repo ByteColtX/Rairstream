@@ -25,8 +25,12 @@ fn test_menu_model_without_devices_shows_placeholder() {
     assert!(model.refresh_enabled);
     assert_eq!(model.auto_reconnect_label, "自动重连：开");
     assert_eq!(model.launch_at_startup_label, "开机启动：关");
-    assert_eq!(model.volume_items.len(), 8);
+    assert_eq!(model.volume_items.len(), 10);
     assert_eq!(model.volume_items[4].label, "● 100%");
+    assert_eq!(model.volume_items[8].percent, 300);
+    assert_eq!(model.volume_items[8].label, "300%");
+    assert_eq!(model.volume_items[9].percent, 400);
+    assert_eq!(model.volume_items[9].label, "400%");
     assert_eq!(model.volume_warning_label, None);
     assert!(model.device_items.is_empty());
     assert_eq!(model.empty_label.as_deref(), Some("未发现可用设备"));
@@ -138,9 +142,9 @@ fn test_menu_model_for_connection_related_states_marks_device_status() {
     );
     assert_eq!(streaming_model.status_label, "Rairstream：正在串流 Bedroom");
     assert_eq!(streaming_model.device_items[0].label, "● Bedroom（串流中）");
-    assert_eq!(streaming_model.volume_items.len(), 8);
-    assert_eq!(streaming_model.volume_items[7].percent, 200);
-    assert_eq!(streaming_model.volume_items[7].label, "200%");
+    assert_eq!(streaming_model.volume_items.len(), 10);
+    assert_eq!(streaming_model.volume_items[9].percent, 400);
+    assert_eq!(streaming_model.volume_items[9].label, "400%");
     assert_eq!(streaming_model.volume_warning_label, None);
 }
 
@@ -165,22 +169,22 @@ fn test_menu_model_marks_selected_volume_preset() {
 }
 
 #[test]
-fn test_menu_model_marks_selected_boosted_volume_and_exposes_warning() {
+fn test_menu_model_marks_selected_400_percent_volume_preset() {
     let state = TrayAppState {
         app_state: AppState::default(),
         devices: Vec::new(),
         auto_reconnect: true,
         launch_at_startup: false,
-        sender_volume_percent: 125,
+        sender_volume_percent: 400,
         sender_muted: false,
         last_error: None,
     };
 
     let model = build_tray_menu_model(&state);
 
-    assert_eq!(model.volume_items[5].percent, 125);
-    assert!(model.volume_items[5].selected);
-    assert_eq!(model.volume_items[5].label, "● 125%");
+    assert_eq!(model.volume_items[9].percent, 400);
+    assert!(model.volume_items[9].selected);
+    assert_eq!(model.volume_items[9].label, "● 400%");
     assert_eq!(
         model.volume_warning_label.as_deref(),
         Some("音量已提升超过 100%，高电平时可能出现失真")

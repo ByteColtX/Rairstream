@@ -19,7 +19,7 @@ enum TrayAction {
     ToggleLaunchAtStartup,
     SelectDevice(String),
     ToggleSenderMute,
-    SetSenderVolume(u8),
+    SetSenderVolume(u16),
     StopStreaming,
     ShowAbout,
     Quit,
