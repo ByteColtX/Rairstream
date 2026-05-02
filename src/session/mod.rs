@@ -136,7 +136,7 @@ fn format_device_id(value: u64) -> String {
     identifier
 }
 
-/// AirPlay 会话阶段的错误集合。
+/// `AirPlay` 会话阶段的错误集合。
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum AirPlayError {
     #[error("unsupported audio format: {message}")]

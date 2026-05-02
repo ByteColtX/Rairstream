@@ -40,7 +40,7 @@ impl PreparedSession {
                 session.handshake()?,
             ))),
             Self::ModernAirPlay(session) => {
-                Ok(SessionConnection::ModernAirPlay(session.handshake()?))
+                Ok(SessionConnection::ModernAirPlay(Box::new(session.handshake()?)))
             }
         }
     }
@@ -64,7 +64,7 @@ impl PreparedSession {
 #[derive(Debug)]
 pub enum SessionConnection {
     ClassicRaop(Box<RaopConnection>),
-    ModernAirPlay(ModernAirPlayConnection),
+    ModernAirPlay(Box<ModernAirPlayConnection>),
 }
 
 impl SessionConnection {

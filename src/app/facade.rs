@@ -56,7 +56,7 @@ where
         self.state.session = SessionState::Discovering;
         let mut receivers = self.discovery.discover_devices();
         sort_receivers(&mut receivers);
-        self.state.last_receivers = receivers.clone();
+        self.state.last_receivers.clone_from(&receivers);
         receiver_cache::cache_receivers(&mut self.config, &receivers);
         let persist_result = self.persist_config();
         self.state.session = SessionState::Idle;

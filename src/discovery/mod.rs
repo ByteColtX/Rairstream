@@ -91,12 +91,11 @@ pub mod testing {
 
     #[must_use]
     pub fn parse_test_services(services: Vec<MdnsTestResolvedService>) -> Vec<Receiver> {
-        parse_resolved_services(
-            services
-                .into_iter()
-                .map(MdnsTestResolvedService::into_resolved_service)
-                .collect(),
-        )
+        let services: Vec<_> = services
+            .into_iter()
+            .map(MdnsTestResolvedService::into_resolved_service)
+            .collect();
+        parse_resolved_services(&services)
     }
 }
 

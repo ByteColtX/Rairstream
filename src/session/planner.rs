@@ -25,6 +25,7 @@ pub struct SessionPlan {
     pub support_level: SupportLevel,
 }
 
+#[must_use]
 pub fn plan_session(receiver: &Receiver, input_format: AudioFormat) -> SessionPlan {
     let transport = match receiver.transport_profile {
         TransportProfile::Raop => PlannedTransport::Raop,

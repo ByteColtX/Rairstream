@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 
 use crate::audio::AudioFormat;
@@ -30,12 +31,15 @@ impl ConnectedReceiver {
     }
 }
 
-pub fn connect_receivers(
+pub fn connect_receivers<S>(
     receivers: &[Receiver],
     input_format: AudioFormat,
-    paired_receivers: &HashMap<String, ReceiverCredentials>,
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
-) -> Result<Vec<ConnectedReceiver>, RairstreamError> {
+) -> Result<Vec<ConnectedReceiver>, RairstreamError>
+where
+    S: BuildHasher,
+{
     let sender_volume_percent = sender_volume_percent.clamp(100, MAX_SENDER_VOLUME_PERCENT);
     let mut connected = Vec::with_capacity(receivers.len());
     for receiver in receivers {

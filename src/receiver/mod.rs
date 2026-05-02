@@ -15,19 +15,14 @@ pub enum AirPlayGeneration {
     AirPlay2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportProfile {
     #[serde(alias = "classic_raop")]
+    #[default]
     Raop,
     #[serde(alias = "modern_airplay_auth")]
     ModernAuthRaop,
-}
-
-impl Default for TransportProfile {
-    fn default() -> Self {
-        Self::Raop
-    }
 }
 
 impl TransportProfile {
@@ -122,6 +117,7 @@ pub struct RaopMetadata {
     pub digest_auth: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver {
     pub id: String,

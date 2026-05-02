@@ -18,6 +18,7 @@ impl Version {
         }
     }
 
+    #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         let value = value.trim();
         if value.is_empty() {

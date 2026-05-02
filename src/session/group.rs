@@ -13,13 +13,8 @@ impl FanoutAudioSink {
 
 impl AudioSink for FanoutAudioSink {
     fn write(&mut self, chunk: AudioChunk) -> Result<(), AudioCaptureError> {
-        let len = self.sinks.len();
-        for (index, sink) in self.sinks.iter_mut().enumerate() {
-            if index + 1 == len {
-                sink.write(chunk.clone())?;
-            } else {
-                sink.write(chunk.clone())?;
-            }
+        for sink in &mut self.sinks {
+            sink.write(chunk.clone())?;
         }
 
         Ok(())

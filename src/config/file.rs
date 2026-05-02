@@ -11,6 +11,7 @@ use super::model::AppConfig;
 const CONFIG_DIR_NAME: &str = "Rairstream";
 const CONFIG_FILE_NAME: &str = "config.json";
 
+#[must_use]
 pub fn default_config_path() -> PathBuf {
     default_config_dir().join(CONFIG_FILE_NAME)
 }

@@ -52,7 +52,7 @@ impl DiscoveryService for MdnsDiscoveryService {
             self.timeout,
         ));
 
-        parse_resolved_services(services)
+        parse_resolved_services(&services)
     }
 }
 

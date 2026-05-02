@@ -8,7 +8,7 @@ use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{Decoder, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader};
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::default::{get_codecs, get_probe};
@@ -31,7 +31,8 @@ impl FileChunkDecoder {
         let file = File::open(path).map_err(|error| AudioCaptureError::RuntimeInitialization {
             message: format!("failed to open `{}`: {error}", path.display()),
         })?;
-        let media_source = MediaSourceStream::new(Box::new(file), Default::default());
+        let media_source =
+            MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
         let mut hint = Hint::new();
         if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
             hint.with_extension(extension);

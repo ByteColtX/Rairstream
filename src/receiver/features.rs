@@ -5,19 +5,15 @@ use serde::{Deserialize, Serialize};
 pub struct Features(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod {
+    #[default]
     None,
     LegacyPin,
     HomeKitTransient,
     FairPlayRequired,
     MfiRequired,
-}
-
-impl Default for AuthMethod {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl Features {
@@ -36,24 +32,16 @@ impl Features {
         Self(raw)
     }
 
+    #[must_use]
     pub fn from_txt_value(value: &str) -> Option<Self> {
         let value = value.trim();
         if value.is_empty() {
             return None;
         }
 
-        fn parse_hex(part: &str) -> Option<u64> {
-            let normalized = part
-                .trim()
-                .strip_prefix("0x")
-                .or_else(|| part.trim().strip_prefix("0X"))
-                .unwrap_or(part.trim());
-            u64::from_str_radix(normalized, 16).ok()
-        }
-
         let (lower, upper) = match value.split_once(',') {
-            Some((lower, upper)) => (parse_hex(lower)?, parse_hex(upper)?),
-            None => (parse_hex(value)?, 0),
+            Some((lower, upper)) => (parse_feature_hex(lower)?, parse_feature_hex(upper)?),
+            None => (parse_feature_hex(value)?, 0),
         };
 
         Some(Self(lower | (upper << 32)))
@@ -153,6 +141,15 @@ impl Features {
 
         AuthMethod::None
     }
+}
+
+fn parse_feature_hex(part: &str) -> Option<u64> {
+    let normalized = part
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| part.trim().strip_prefix("0X"))
+        .unwrap_or(part.trim());
+    u64::from_str_radix(normalized, 16).ok()
 }
 
 #[cfg(test)]

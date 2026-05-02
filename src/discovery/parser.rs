@@ -6,6 +6,7 @@ use crate::receiver::{
 
 use super::{MdnsServiceKind, ResolvedMdnsService};
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedDeviceCandidate {
     id: String,
@@ -43,7 +44,7 @@ struct ParsedDeviceCandidate {
     raop: RaopMetadata,
 }
 
-pub(crate) fn parse_resolved_services(services: Vec<ResolvedMdnsService>) -> Vec<Receiver> {
+pub(crate) fn parse_resolved_services(services: &[ResolvedMdnsService]) -> Vec<Receiver> {
     let mut candidates = Vec::<ParsedDeviceCandidate>::new();
 
     for service in services {
@@ -118,7 +119,7 @@ fn build_receiver(candidate: ParsedDeviceCandidate) -> Receiver {
     .with_compat_fields()
 }
 
-fn parse_resolved_service(service: ResolvedMdnsService) -> Option<ParsedDeviceCandidate> {
+fn parse_resolved_service(service: &ResolvedMdnsService) -> Option<ParsedDeviceCandidate> {
     if service.port == 0 {
         return None;
     }
@@ -142,7 +143,7 @@ fn parse_resolved_service(service: ResolvedMdnsService) -> Option<ParsedDeviceCa
         return None;
     }
 
-    let features = parse_features(&service);
+    let features = parse_features(service);
     let raop_source_version = service
         .txt_value_any(&["vs", "vn"])
         .and_then(Version::parse)
@@ -202,7 +203,7 @@ fn parse_resolved_service(service: ResolvedMdnsService) -> Option<ParsedDeviceCa
             .txt_value("rsf")
             .and_then(Features::from_txt_value)
             .unwrap_or_default(),
-        status_flags: parse_status_flags(&service),
+        status_flags: parse_status_flags(service),
         requires_password: parse_boolish(service.txt_value("pw")),
         access_control: service.txt_value("acl").and_then(parse_u8ish),
         pairing_identity: service.txt_value("pi").map(String::from),
@@ -663,7 +664,7 @@ mod tests {
 
     #[test]
     fn merges_airplay_and_raop_metadata_for_modern_receiver() {
-        let receivers = parse_resolved_services(vec![
+        let receivers = parse_resolved_services(&[
             service(
                 MdnsServiceKind::Raop,
                 "5855CA1AE288@Living Room._raop._tcp.local.",
@@ -759,7 +760,7 @@ mod tests {
 
     #[test]
     fn required_sender_features_can_mark_receiver_unsupported() {
-        let receivers = parse_resolved_services(vec![service(
+        let receivers = parse_resolved_services(&[service(
             MdnsServiceKind::AirPlay,
             "Conference Room._airplay._tcp.local.",
             [192, 168, 1, 21],

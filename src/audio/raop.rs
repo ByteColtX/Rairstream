@@ -1,4 +1,5 @@
 //! 输入音频的 `decode`、`downmix`、`resample` 与 `packetize` 路径。
+use std::f64::consts::FRAC_1_SQRT_2;
 use std::mem;
 
 use num_traits::ToPrimitive;
@@ -15,7 +16,7 @@ pub(crate) const RAOP_STARTUP_LATENCY_MILLIS: u32 = 250;
 pub(crate) const RAOP_STARTUP_LATENCY_FRAMES: u32 =
     RAOP_STARTUP_LATENCY_MILLIS * RAOP_SAMPLE_RATE_HZ / 1_000;
 
-const CENTER_MIX_GAIN: f64 = 0.707_106_781_186_547_6;
+const CENTER_MIX_GAIN: f64 = FRAC_1_SQRT_2;
 const SURROUND_MIX_GAIN: f64 = 0.5;
 const LFE_MIX_GAIN: f64 = 0.5;
 
@@ -149,13 +150,7 @@ fn decode_frame_to_stereo(
     channels: usize,
     bytes_per_sample: usize,
 ) -> Result<[f64; 2], AirPlayError> {
-    let sample = |channel_index: usize| {
-        let sample_offset = frame_offset + channel_index * bytes_per_sample;
-        decode_sample(
-            &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
-            chunk.format,
-        )
-    };
+    let sample = |channel_index| decode_frame_sample(chunk, frame_offset, channel_index, bytes_per_sample);
 
     match channels {
         0 => Err(AirPlayError::UnsupportedAudioFormat {
@@ -166,110 +161,149 @@ fn decode_frame_to_stereo(
             Ok([mono, mono])
         }
         2 => Ok([sample(0)?, sample(1)?]),
-        3 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let center = sample(2)?;
-            Ok([
-                left + center * CENTER_MIX_GAIN,
-                right + center * CENTER_MIX_GAIN,
-            ])
-        }
-        4 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let back_left = sample(2)?;
-            let back_right = sample(3)?;
-            Ok([
-                left + back_left * SURROUND_MIX_GAIN,
-                right + back_right * SURROUND_MIX_GAIN,
-            ])
-        }
-        5 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let center = sample(2)?;
-            let back_left = sample(3)?;
-            let back_right = sample(4)?;
-            Ok([
-                left + center * CENTER_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
-                right + center * CENTER_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
-            ])
-        }
-        6 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let center = sample(2)?;
-            let lfe = sample(3)?;
-            let back_left = sample(4)?;
-            let back_right = sample(5)?;
-            Ok([
-                left + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_left * SURROUND_MIX_GAIN,
-                right
-                    + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_right * SURROUND_MIX_GAIN,
-            ])
-        }
-        7 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let center = sample(2)?;
-            let lfe = sample(3)?;
-            let back_center = sample(4)?;
-            let side_left = sample(5)?;
-            let side_right = sample(6)?;
-            Ok([
-                left + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_center * SURROUND_MIX_GAIN
-                    + side_left * SURROUND_MIX_GAIN,
-                right
-                    + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_center * SURROUND_MIX_GAIN
-                    + side_right * SURROUND_MIX_GAIN,
-            ])
-        }
-        8 => {
-            let left = sample(0)?;
-            let right = sample(1)?;
-            let center = sample(2)?;
-            let lfe = sample(3)?;
-            let back_left = sample(4)?;
-            let back_right = sample(5)?;
-            let side_left = sample(6)?;
-            let side_right = sample(7)?;
-            Ok([
-                left + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_left * SURROUND_MIX_GAIN
-                    + side_left * SURROUND_MIX_GAIN,
-                right
-                    + center * CENTER_MIX_GAIN
-                    + lfe * LFE_MIX_GAIN
-                    + back_right * SURROUND_MIX_GAIN
-                    + side_right * SURROUND_MIX_GAIN,
-            ])
-        }
-        _ => {
-            let mut left = sample(0)?;
-            let mut right = sample(1)?;
+        3 => mix_three_channel(&sample),
+        4 => mix_four_channel(&sample),
+        5 => mix_five_channel(&sample),
+        6 => mix_six_channel(&sample),
+        7 => mix_seven_channel(&sample),
+        8 => mix_eight_channel(&sample),
+        _ => mix_fallback_channels(channels, &sample),
+    }
+}
 
-            for channel_index in 2..channels {
-                let channel_sample = sample(channel_index)?;
-                if channel_index % 2 == 0 {
-                    left += channel_sample * SURROUND_MIX_GAIN;
-                } else {
-                    right += channel_sample * SURROUND_MIX_GAIN;
-                }
-            }
+fn decode_frame_sample(
+    chunk: &AudioChunk,
+    frame_offset: usize,
+    channel_index: usize,
+    bytes_per_sample: usize,
+) -> Result<f64, AirPlayError> {
+    let sample_offset = frame_offset + channel_index * bytes_per_sample;
+    decode_sample(
+        &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
+        chunk.format,
+    )
+}
 
-            Ok([left, right])
+fn mix_three_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN,
+    ])
+}
+
+fn mix_four_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let back_left = sample(2)?;
+    let back_right = sample(3)?;
+    Ok([
+        left + back_left * SURROUND_MIX_GAIN,
+        right + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_five_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let back_left = sample(3)?;
+    let back_right = sample(4)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_six_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_left = sample(4)?;
+    let back_right = sample(5)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN + lfe * LFE_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN + lfe * LFE_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_seven_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_center = sample(4)?;
+    let side_left = sample(5)?;
+    let side_right = sample(6)?;
+    Ok([
+        left
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_center * SURROUND_MIX_GAIN
+            + side_left * SURROUND_MIX_GAIN,
+        right
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_center * SURROUND_MIX_GAIN
+            + side_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_eight_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_left = sample(4)?;
+    let back_right = sample(5)?;
+    let side_left = sample(6)?;
+    let side_right = sample(7)?;
+    Ok([
+        left
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_left * SURROUND_MIX_GAIN
+            + side_left * SURROUND_MIX_GAIN,
+        right
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_right * SURROUND_MIX_GAIN
+            + side_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_fallback_channels(
+    channels: usize,
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let mut left = sample(0)?;
+    let mut right = sample(1)?;
+
+    for channel_index in 2..channels {
+        let channel_sample = sample(channel_index)?;
+        if channel_index % 2 == 0 {
+            left += channel_sample * SURROUND_MIX_GAIN;
+        } else {
+            right += channel_sample * SURROUND_MIX_GAIN;
         }
     }
+
+    Ok([left, right])
 }
 
 fn apply_gain(frames: &mut [[f64; 2]], gain_multiplier: f64) {

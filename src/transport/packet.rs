@@ -17,7 +17,7 @@ impl RaopPacketCounters {
     }
 
     #[must_use]
-    pub fn peek_audio_packet(&self) -> (u16, u32) {
+    pub fn peek_audio_packet(self) -> (u16, u32) {
         (self.next_sequence, self.next_timestamp)
     }
 
