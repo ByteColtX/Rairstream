@@ -1,129 +1,281 @@
-# Rairstream
+<a id="readme-top"></a>
 
-> 让 Windows 也能将任意系统音频实时串流到 AirPlay 接收端。
+[![Contributors][contributors-shield]][contributors-url]
+[![Forks][forks-shield]][forks-url]
+[![Stargazers][stars-shield]][stars-url]
+[![Issues][issues-shield]][issues-url]
+[![License][license-shield]][license-url]
 
-[English README](./README.en.md)
+<div align="center">
+  <h3 align="center">Rairstream</h3>
+  <p align="center">
+    面向 AirPlay / RAOP 音频发送的 CLI-first Rust 工程
+    <br />
+    当前已验证设备发现、AirPlay 2 接收端配对、本地文件播放，以及 Windows 实时系统音频串流
+    <br />
+    未来 GUI / TUI 将通过统一 facade 接入
+    <br />
+    <a href="./README.en.md"><strong>English README</strong></a>
+    ·
+    <a href="https://github.com/ByteColtX/Rairstream/issues">报告问题</a>
+    ·
+    <a href="https://github.com/ByteColtX/Rairstream/issues">功能建议</a>
+  </p>
+</div>
 
-Rairstream 是一个面向 Windows 的原生 Rust 桌面应用，可将浏览器、音乐播放器、游戏和系统提示音等任意系统音频直接串流到兼容 AirPlay 的接收端，无需额外转发软件。
+## 目录
 
-## 当前状态
+- [关于项目](#关于项目)
+  - [当前阶段](#当前阶段)
+  - [技术栈](#技术栈)
+- [开始使用](#开始使用)
+  - [环境要求](#环境要求)
+  - [安装](#安装)
+- [使用方式](#使用方式)
+  - [发现与检查设备](#发现与检查设备)
+  - [首次配对](#首次配对)
+  - [播放本地音频文件](#播放本地音频文件)
+  - [实时串流系统音频](#实时串流系统音频)
+  - [Selector 规则](#selector-规则)
+  - [配置文件](#配置文件)
+- [路线图](#路线图)
+- [贡献](#贡献)
+  - [贡献要求](#贡献要求)
+- [许可证](#许可证)
+- [联系方式](#联系方式)
+- [致谢](#致谢)
 
-Rairstream 仍在持续开发中，但核心端到端链路已经可用：
+## 关于项目
 
-- 发现接收端
-- 从系统托盘选择设备
-- 对需要认证的接收端执行 PIN 配对
-- 通过 WASAPI loopback 采集并发送音频
-- 停止串流并完成清理
+Rairstream 的目标，是把 AirPlay / RAOP 音频发送整理成一套清晰、可维护、可继续扩展的 Rust 工程。
 
-## 支持的接收端类型
+当前仓库已经不再围绕旧的 tray 形态组织，而是先把 CLI 主链路跑通，再把 discovery、pairing、session、audio、rtsp、timing 等核心模块边界稳定下来。这样后续无论补 GUI、TUI，还是继续扩展到更多平台，都不需要直接碰协议细节。
 
-| 接收端类型 | 示例 | 状态 |
-| --- | --- | --- |
-| AirPlay 1 / RAOP | AirPort Express、较老的音箱 / AVR、`shairport-sync` 一类兼容接收端 | 已支持 |
-| AirPlay Receiver | macOS AirPlay Receiver、需要配对或认证的 Apple TV 类接收端 | 已支持 |
-| 完整 AirPlay 2 特性集 | 多房间播放、分组播放、完整 AirPlay 2 兼容 | 暂未实现 |
+当前已验证的主链路如下：
 
-## 当前能力
-
-- 通过 `_raop._tcp.local.` 与 `_airplay._tcp.local.` 发现接收端
-- 向经典 `AirPlay 1 / RAOP` 接收端发送 Windows 系统音频
-- 对 `AirPlay Receiver` 执行 PIN 配对
-- 保存配对凭据，并在后续连接中恢复认证
-- 通过系统托盘启动、停止和切换设备
-- 提供不依赖系统托盘的完整 CLI 模式，可完成发现、选择、配对与串流闭环
-- 当前固定发送格式为 `44.1 kHz / 16-bit / 2 声道 PCM (L16/44100/2)`；多声道输入会在发送前下混为立体声
-
-### 当前音频配置
-
-| 项目 | 当前值 |
+| 能力 | 状态 |
 | --- | --- |
-| 采集后端 | `Windows WASAPI shared loopback capture`（事件驱动） |
-| 输出编码 | `L16` |
-| 输出采样率 | `44.1 kHz` |
-| 输出位深 | `16-bit` |
-| 输出声道数 | `2` |
-| RTP 每包帧数 | `352` frames |
-| 启动延迟 | `11025` frames（约 `250 ms @ 44.1 kHz`） |
-| 多声道输入处理 | 下混为立体声 |
+| `_raop` / `_airplay` 发现接收端 | 已验证 |
+| `inspect` 查看 receiver 元数据 | 已验证 |
+| AirPlay 2 接收端首次 PIN 配对 | 已验证 |
+| 恢复已保存凭据 | 已验证 |
+| 本地音频文件播放 | 已验证 |
+| Windows WASAPI loopback 实时系统音频串流 | 已验证 |
+| 多设备 fan-out | 未验证 |
 
-## 当前限制
+### 当前阶段
 
-- 仅支持 Windows
-- 当前仅支持音频串流，不支持视频或屏幕镜像
-- 兼容性仍取决于接收端型号与固件版本
-- 某些 AirPlay 2 设备可能可通过已支持的接收路径工作，但 Rairstream 不是完整的 AirPlay 2 实现
+- 当前主入口是 CLI
+- 未来 GUI / TUI 会通过 `src/app` facade 接入，而不是直接耦合协议层
+- 当前主验证平台是 Windows
+- 当前项目聚焦 AirPlay 音频发送，不覆盖视频或屏幕镜像
+- 当前活跃发送 codec 仍是固定 `PCM/L16`
+- `ALAC` / `AAC` 已进入 capability 模型，但还不是当前活跃发送路径
 
-## 快速开始
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### 技术栈
+
+- [Rust](https://www.rust-lang.org/)
+- [mdns-sd](https://crates.io/crates/mdns-sd)
+- [symphonia](https://crates.io/crates/symphonia)
+- [wasapi](https://crates.io/crates/wasapi)（Windows capture）
+- `serde` / `tracing`
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 开始使用
 
 ### 环境要求
 
-- Windows 11 或其他支持 WASAPI loopback 的 Windows 版本
-- Rust 1.85+
-- 与接收端处于同一局域网
+- Rust `1.85+`
+- 发送端与接收端位于同一局域网
+- 若使用 `play capture`，当前必须运行在 Windows
 
-### 启动托盘应用
+### 安装
+
+1. 克隆仓库
+
+   ```bash
+   git clone https://github.com/ByteColtX/Rairstream.git
+   cd Rairstream
+   ```
+
+2. 构建项目
+
+   ```bash
+   cargo build
+   ```
+
+3. 直接运行 CLI
+
+   ```bash
+   cargo run -- discover
+   ```
+
+4. 如果你希望直接使用二进制：
+
+   - 开发构建：`target\debug\rairstream.exe`
+   - 发布构建：`target\release\rairstream.exe`
+   - 例如：
+
+   ```bash
+   target\release\rairstream.exe discover
+   ```
+
+如果你希望先做 release 构建：
 
 ```bash
-cargo run
+cargo build --release
 ```
 
-### 运行 CLI 模式
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 使用方式
+
+当前 CLI 入口如下：
 
 ```bash
-cargo run -- cli discover
-cargo run -- cli start --device "Living Room"
+rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>
 ```
-
-## CLI
 
 ```bash
-rairstream [OPTIONS] [tray | cli <discover|start> [--device <DEVICE_FILTER>] [--pin <PIN>]]
+rairstream discover
+rairstream inspect --device <selector>
+rairstream pair --device <selector> [--pin <PIN>]
+rairstream paired list
+rairstream paired forget --device <selector>
+rairstream play file <path> --device <selector>...
+rairstream play capture --device <selector>...
 ```
 
-- 默认：启动托盘模式
-- `tray`：显式启动托盘模式
-- `cli discover`：发现并列出可用接收端
-- `cli start`：不依赖托盘，直接以前台模式启动串流
-- `cli start --device <DEVICE_FILTER>`：按设备名、ID 或主机地址匹配
-- `cli start --pin <PIN>`：在需要时以非交互方式提供配对 PIN
-- `-v` / `-vv`：启用 debug / trace 日志
-- `--log-level <error|warn|info|debug|trace>`：显式设置日志级别
+### 发现与检查设备
 
-## 路线图 / TODO
+发现设备：
 
-### 音频
+```bash
+cargo run -- discover
+```
 
-- [ ] 在托盘中增加 `0–100%` 发送端音量控制
-- [ ] 增加静音开关
-- [ ] 评估接收端音量同步与 dB 映射策略
-- [ ] 保持当前固定发送格式 `44.1 kHz / 16-bit / 2 声道 PCM (L16/44100/2)` 的同时，评估可配置输出档位
-- [ ] 明确覆盖 `44.1 kHz` 与 `48 kHz` 输入链路
-- [ ] 明确覆盖 `16-bit / 24-bit / 32-bit` 输入格式转换
-- [ ] 明确覆盖 `1 / 2 / 6 / 8` 声道输入的处理策略（当前多声道会下混为 `2` 声道）
-- [ ] 评估将启动延迟从当前 `11025` frames（约 `250 ms @ 44.1 kHz`）进一步收敛
-- [ ] 持续优化缓冲、保活与长时间稳定性
+检查设备详情：
 
-### 采集
+```bash
+cargo run -- inspect --device 001122334455
+```
 
-- [ ] 在当前 `WASAPI shared loopback` 之外，增加 `WASAPI process loopback`
-- [ ] 支持按应用选择音频来源（例如仅串流浏览器、播放器或游戏）
+`inspect` 会输出 receiver 的 profile、auth、pairing、codecs、support、group 等元数据。
 
-### 桌面体验
+### 首次配对
 
-- [ ] 自动重连
-- [ ] 记住上次设备
-- [ ] 开机启动
-- [ ] 最小化到托盘启动
-- [ ] 更清晰的配对 / 认证失败恢复路径
+交互式配对：
 
-### 兼容性与验证
+```bash
+cargo run -- pair --device 001122334455
+```
 
-- [ ] 扩大真实设备验证范围，并维护已验证设备列表（优先补 Apple TV、HomePod、第三方音箱 / AVR）
-- [ ] 持续提升不同 AirPlay Receiver 实现的兼容性
-- [ ] 评估更广泛的 AirPlay 2 接收端兼容性
+这条命令会先请求接收端显示 PIN，然后在终端中提示输入 PIN。
 
-## 开发
+非交互式配对：
+
+```bash
+cargo run -- pair --device 001122334455 --pin 123456
+```
+
+查看已保存配对：
+
+```bash
+cargo run -- paired list
+```
+
+移除已保存配对：
+
+```bash
+cargo run -- paired forget --device 001122334455
+```
+
+### 播放本地音频文件
+
+```bash
+cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device 001122334455
+```
+
+多设备播放：
+
+```bash
+cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device "Living Room" --device "Kitchen"
+```
+
+### 实时串流系统音频
+
+```bash
+cargo run -- play capture --device 001122334455
+```
+
+当前这条路径走的是 Windows `WASAPI shared loopback`。运行后按 `Ctrl+C` 停止。
+
+### Selector 规则
+
+`selector` 当前支持以下匹配方式：
+
+- 设备名
+- 设备 ID
+- 带冒号的设备 ID，例如 `00:11:22:33:44:55`
+- 主机地址，例如 `192.168.1.20`
+- `host:port`，例如 `192.168.1.20:7000`
+
+匹配逻辑上，优先使用 exact match；如果没有 exact match，再回退到设备名的 partial match。
+
+### 配置文件
+
+默认配置文件位置：
+
+- Windows：`%APPDATA%\Rairstream\config.json`
+- Linux / Unix：`$XDG_CONFIG_HOME/rairstream/config.json`
+- 若未设置 `XDG_CONFIG_HOME`：`~/.config/rairstream/config.json`
+
+当前会持久化：
+
+- 已配对接收端凭据
+- 接收端缓存
+- 发送端音量配置
+
+当前发送链路：
+
+- 输出 codec：`L16`
+- 输出采样率：`44.1 kHz`
+- 输出位深：`16-bit`
+- 输出声道：`2-channel stereo`
+- 多声道输入会在发送前 downmix 到 stereo
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 路线图
+
+- [ ] 为 GUI / TUI 补稳定前端入口
+- [ ] 为非 Windows 平台补 capture backend
+- [ ] 让 `ALAC` / `AAC` 成为可用发送路径，而不只是 capability 元数据
+- [ ] 继续细化 modern receiver 的 session / auth / timing 路径
+- [ ] 扩大真实设备验证矩阵
+
+查看当前与后续工作项，也可以直接进入 [Issues](https://github.com/ByteColtX/Rairstream/issues)。
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 贡献
+
+如果你希望改进文档、补测试、修复协议细节或扩展平台支持，欢迎提交 Issue 或 Pull Request。
+
+建议流程：
+
+1. Fork 仓库
+2. 创建分支
+3. 提交修改
+4. 推送分支
+5. 创建 Pull Request
+
+### 贡献要求
+
+提交前请至少完成以下检查：
 
 ```bash
 cargo build
@@ -132,6 +284,43 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-## License
+额外约定：
 
-Apache-2.0
+- 如果改动了 CLI 命令面、行为或用户可见文案，请同步更新 README 与相关测试
+- 保持日志输出为英文
+- 新增代码应继续遵守当前模块边界，不把 UI / platform 细节反向带回协议核心
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 许可证
+
+基于 Apache-2.0 许可证分发。详见 [LICENSE](./LICENSE)。
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 联系方式
+
+- GitHub: [@ByteColtX](https://github.com/ByteColtX)
+- Project Link: [https://github.com/ByteColtX/Rairstream](https://github.com/ByteColtX/Rairstream)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## 致谢
+
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template)
+- [symphonia](https://github.com/pdeljanov/Symphonia)
+- [mdns-sd](https://github.com/keepsimple1/mdns-sd)
+- [wasapi-rs](https://github.com/HEnquist/wasapi-rs)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+[contributors-shield]: https://img.shields.io/github/contributors/ByteColtX/Rairstream.svg?style=for-the-badge
+[contributors-url]: https://github.com/ByteColtX/Rairstream/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/ByteColtX/Rairstream.svg?style=for-the-badge
+[forks-url]: https://github.com/ByteColtX/Rairstream/network/members
+[stars-shield]: https://img.shields.io/github/stars/ByteColtX/Rairstream.svg?style=for-the-badge
+[stars-url]: https://github.com/ByteColtX/Rairstream/stargazers
+[issues-shield]: https://img.shields.io/github/issues/ByteColtX/Rairstream.svg?style=for-the-badge
+[issues-url]: https://github.com/ByteColtX/Rairstream/issues
+[license-shield]: https://img.shields.io/github/license/ByteColtX/Rairstream.svg?style=for-the-badge
+[license-url]: https://github.com/ByteColtX/Rairstream/blob/main/LICENSE
