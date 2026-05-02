@@ -1,6 +1,8 @@
+//! 贯穿 CLI、应用编排和传输层的顶层错误类型。
+
 use crate::audio::AudioCaptureError;
 use crate::config::ConfigError;
-use crate::transport::AirPlayError;
+use crate::session::AirPlayError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,7 +34,7 @@ pub enum RairstreamError {
     #[error(transparent)]
     Audio(#[from] AudioCaptureError),
     #[error(transparent)]
-    Transport(#[from] AirPlayError),
+    Session(#[from] AirPlayError),
     #[error(transparent)]
     Config(#[from] ConfigError),
 }

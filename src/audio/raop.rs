@@ -1,15 +1,26 @@
+//! 输入音频的 `decode`、`downmix`、`resample` 与 `packetize` 路径。
+use std::f64::consts::FRAC_1_SQRT_2;
 use std::mem;
 
 use num_traits::ToPrimitive;
 
-use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
+use super::{AudioChunk, AudioFormat, AudioSampleType};
 use crate::config::MAX_SENDER_VOLUME_PERCENT;
+use crate::session::AirPlayError;
 
-use super::{
-    AirPlayError, RAOP_BITS_PER_SAMPLE, RAOP_CHANNELS, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
-};
+pub(crate) const RAOP_SAMPLE_RATE_HZ: u32 = 44_100;
+pub(crate) const RAOP_CHANNELS: u16 = 2;
+pub(crate) const RAOP_BITS_PER_SAMPLE: u16 = 16;
+pub(crate) const RAOP_FRAMES_PER_PACKET: usize = 352;
+pub(crate) const RAOP_STARTUP_LATENCY_MILLIS: u32 = 250;
+pub(crate) const RAOP_STARTUP_LATENCY_FRAMES: u32 =
+    RAOP_STARTUP_LATENCY_MILLIS * RAOP_SAMPLE_RATE_HZ / 1_000;
 
-/// 首版 `RAOP` 发送端使用的固定音频描述。
+const CENTER_MIX_GAIN: f64 = FRAC_1_SQRT_2;
+const SURROUND_MIX_GAIN: f64 = 0.5;
+const LFE_MIX_GAIN: f64 = 0.5;
+
+/// 经典 `RAOP` 发送端使用的固定音频描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodecDescription {
     pub encoding_name: &'static str,
@@ -28,6 +39,7 @@ impl CodecDescription {
     }
 }
 
+/// 将输入 `AudioChunk` 重采样并切成 `RAOP` 所需的 `PCM packet`。
 #[derive(Debug, Clone)]
 pub struct AudioResampler {
     source_format: AudioFormat,
@@ -66,7 +78,7 @@ impl AudioResampler {
     pub fn push_chunk(&mut self, chunk: &AudioChunk) -> Result<Vec<Vec<u8>>, AirPlayError> {
         if chunk.format != self.source_format {
             return Err(AirPlayError::UnsupportedAudioFormat {
-                message: String::from("同一条采集流内的音频格式发生了变化"),
+                message: String::from("audio format changed within a single capture stream"),
             });
         }
 
@@ -99,15 +111,6 @@ impl AudioResampler {
     }
 }
 
-pub fn validate_input_format(format: AudioFormat) -> Result<(), AirPlayError> {
-    format
-        .block_align_bytes()
-        .map(|_| ())
-        .map_err(|error| AirPlayError::UnsupportedAudioFormat {
-            message: error.to_string(),
-        })
-}
-
 fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError> {
     let bytes_per_sample = usize::from(chunk.format.bits_per_sample / 8);
     let channels = usize::from(chunk.format.channels);
@@ -118,49 +121,188 @@ fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError>
             .map_err(|error| AirPlayError::UnsupportedAudioFormat {
                 message: error.to_string(),
             })?;
-    let left_count =
+    let _left_count =
         u32::try_from(channels.div_ceil(2)).map_err(|_| AirPlayError::UnsupportedAudioFormat {
-            message: String::from("声道数超出首版支持范围"),
+            message: String::from("channel count exceeds current support"),
         })?;
-    let right_count =
+    let _right_count =
         u32::try_from(channels / 2).map_err(|_| AirPlayError::UnsupportedAudioFormat {
-            message: String::from("声道数超出首版支持范围"),
+            message: String::from("channel count exceeds current support"),
         })?;
     let mut frames = Vec::with_capacity(chunk.frames);
 
     for frame_index in 0..chunk.frames {
         let frame_offset = frame_index * block_align;
-        let mut left_sum = 0.0_f64;
-        let mut right_sum = 0.0_f64;
-
-        for channel_index in 0..channels {
-            let sample_offset = frame_offset + channel_index * bytes_per_sample;
-            let sample = decode_sample(
-                &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
-                chunk.format,
-            )?;
-
-            if channel_index % 2 == 0 {
-                left_sum += sample;
-            } else {
-                right_sum += sample;
-            }
-        }
-
-        let left = if left_count == 0 {
-            0.0
-        } else {
-            left_sum / f64::from(left_count)
-        };
-        let right = if right_count == 0 {
-            left
-        } else {
-            right_sum / f64::from(right_count)
-        };
-        frames.push([left, right]);
+        frames.push(decode_frame_to_stereo(
+            chunk,
+            frame_offset,
+            channels,
+            bytes_per_sample,
+        )?);
     }
 
     Ok(frames)
+}
+
+fn decode_frame_to_stereo(
+    chunk: &AudioChunk,
+    frame_offset: usize,
+    channels: usize,
+    bytes_per_sample: usize,
+) -> Result<[f64; 2], AirPlayError> {
+    let sample =
+        |channel_index| decode_frame_sample(chunk, frame_offset, channel_index, bytes_per_sample);
+
+    match channels {
+        0 => Err(AirPlayError::UnsupportedAudioFormat {
+            message: String::from("channel count must be greater than 0"),
+        }),
+        1 => {
+            let mono = sample(0)?;
+            Ok([mono, mono])
+        }
+        2 => Ok([sample(0)?, sample(1)?]),
+        3 => mix_three_channel(&sample),
+        4 => mix_four_channel(&sample),
+        5 => mix_five_channel(&sample),
+        6 => mix_six_channel(&sample),
+        7 => mix_seven_channel(&sample),
+        8 => mix_eight_channel(&sample),
+        _ => mix_fallback_channels(channels, &sample),
+    }
+}
+
+fn decode_frame_sample(
+    chunk: &AudioChunk,
+    frame_offset: usize,
+    channel_index: usize,
+    bytes_per_sample: usize,
+) -> Result<f64, AirPlayError> {
+    let sample_offset = frame_offset + channel_index * bytes_per_sample;
+    decode_sample(
+        &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
+        chunk.format,
+    )
+}
+
+fn mix_three_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN,
+    ])
+}
+
+fn mix_four_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let back_left = sample(2)?;
+    let back_right = sample(3)?;
+    Ok([
+        left + back_left * SURROUND_MIX_GAIN,
+        right + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_five_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let back_left = sample(3)?;
+    let back_right = sample(4)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_six_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_left = sample(4)?;
+    let back_right = sample(5)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN + lfe * LFE_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
+        right + center * CENTER_MIX_GAIN + lfe * LFE_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_seven_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_center = sample(4)?;
+    let side_left = sample(5)?;
+    let side_right = sample(6)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_center * SURROUND_MIX_GAIN
+            + side_left * SURROUND_MIX_GAIN,
+        right
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_center * SURROUND_MIX_GAIN
+            + side_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_eight_channel(
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let left = sample(0)?;
+    let right = sample(1)?;
+    let center = sample(2)?;
+    let lfe = sample(3)?;
+    let back_left = sample(4)?;
+    let back_right = sample(5)?;
+    let side_left = sample(6)?;
+    let side_right = sample(7)?;
+    Ok([
+        left + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_left * SURROUND_MIX_GAIN
+            + side_left * SURROUND_MIX_GAIN,
+        right
+            + center * CENTER_MIX_GAIN
+            + lfe * LFE_MIX_GAIN
+            + back_right * SURROUND_MIX_GAIN
+            + side_right * SURROUND_MIX_GAIN,
+    ])
+}
+
+fn mix_fallback_channels(
+    channels: usize,
+    sample: &impl Fn(usize) -> Result<f64, AirPlayError>,
+) -> Result<[f64; 2], AirPlayError> {
+    let mut left = sample(0)?;
+    let mut right = sample(1)?;
+
+    for channel_index in 2..channels {
+        let channel_sample = sample(channel_index)?;
+        if channel_index % 2 == 0 {
+            left += channel_sample * SURROUND_MIX_GAIN;
+        } else {
+            right += channel_sample * SURROUND_MIX_GAIN;
+        }
+    }
+
+    Ok([left, right])
 }
 
 fn apply_gain(frames: &mut [[f64; 2]], gain_multiplier: f64) {
@@ -198,7 +340,7 @@ fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError>
         }
         _ => Err(AirPlayError::UnsupportedAudioFormat {
             message: format!(
-                "暂不支持 {:?} / {}bit 输入格式",
+                "unsupported input format {:?} / {}bit",
                 format.sample_type, format.bits_per_sample
             ),
         }),
@@ -305,11 +447,18 @@ fn quantize_sample(sample: f64) -> i16 {
 mod tests {
     use super::{
         AudioResampler, CodecDescription, decode_and_downmix, encode_pcm_packet, protect_peak,
-        validate_input_format,
     };
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
     use crate::config::MAX_SENDER_VOLUME_PERCENT;
-    use crate::transport::AirPlayError;
+    use crate::session::AirPlayError;
+
+    fn validate_input_format(format: AudioFormat) -> Result<(), AirPlayError> {
+        format.block_align_bytes().map(|_| ()).map_err(|error| {
+            AirPlayError::UnsupportedAudioFormat {
+                message: error.to_string(),
+            }
+        })
+    }
 
     #[test]
     fn pcm_codec_description_matches_raop_mvp() {
@@ -360,7 +509,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [0.8_f32, 0.2, 0.4, 0.6]
+            [0.4_f32, 0.2, 0.1, 0.3]
                 .into_iter()
                 .flat_map(f32::to_le_bytes)
                 .collect(),
@@ -370,8 +519,8 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.6).abs() < 0.001);
-        assert!((frames[0][1] - 0.4).abs() < 0.001);
+        assert!((frames[0][0] - 0.45).abs() < 0.001);
+        assert!((frames[0][1] - 0.35).abs() < 0.001);
     }
 
     #[test]
@@ -400,7 +549,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [1_610_612_736_i32, 536_870_912, 1_073_741_824, 1_073_741_824]
+            [1_073_741_824_i32, 536_870_912, 536_870_912, 1_073_741_824]
                 .into_iter()
                 .flat_map(i32::to_le_bytes)
                 .collect(),
@@ -411,7 +560,7 @@ mod tests {
 
         assert_eq!(frames.len(), 1);
         assert!((frames[0][0] - 0.625).abs() < 0.001);
-        assert!((frames[0][1] - 0.375).abs() < 0.001);
+        assert!((frames[0][1] - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -425,7 +574,7 @@ mod tests {
         let chunk = AudioChunk::new(
             format,
             [
-                0x00_u8, 0x00, 0x40, 0x00, 0x00, 0x20, 0x00, 0x00, 0x20, 0x00, 0x00, 0x40,
+                0x00_u8, 0x00, 0x20, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00, 0x00, 0x20,
             ]
             .into_iter()
             .collect(),
@@ -435,12 +584,12 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.375).abs() < 0.001);
-        assert!((frames[0][1] - 0.375).abs() < 0.001);
+        assert!((frames[0][0] - 0.3125).abs() < 0.001);
+        assert!((frames[0][1] - 0.25).abs() < 0.001);
     }
 
     #[test]
-    fn downmixes_six_channel_input_to_stereo_by_odd_even_groups() {
+    fn keeps_front_left_and_right_level_for_six_channel_input() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
             channels: 6,
@@ -449,7 +598,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [30_000_i16, 6_000, 24_000, 12_000, 18_000, 18_000]
+            [20_000_i16, -20_000, 0, 0, 0, 0]
                 .into_iter()
                 .flat_map(i16::to_le_bytes)
                 .collect(),
@@ -459,12 +608,12 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.7324).abs() < 0.001);
-        assert!((frames[0][1] - 0.3662).abs() < 0.001);
+        assert!((frames[0][0] - 0.6104).abs() < 0.001);
+        assert!((frames[0][1] + 0.6104).abs() < 0.001);
     }
 
     #[test]
-    fn downmixes_eight_channel_input_to_stereo_by_odd_even_groups() {
+    fn keeps_front_left_and_right_level_for_eight_channel_input() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
             channels: 8,
@@ -473,12 +622,10 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [
-                32_000_i16, 4_000, 24_000, 8_000, 16_000, 12_000, 8_000, 16_000,
-            ]
-            .into_iter()
-            .flat_map(i16::to_le_bytes)
-            .collect(),
+            [20_000_i16, -20_000, 0, 0, 0, 0, 0, 0]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect(),
         )
         .unwrap();
 
@@ -486,7 +633,7 @@ mod tests {
 
         assert_eq!(frames.len(), 1);
         assert!((frames[0][0] - 0.6104).abs() < 0.001);
-        assert!((frames[0][1] - 0.3052).abs() < 0.001);
+        assert!((frames[0][1] + 0.6104).abs() < 0.001);
     }
 
     #[test]

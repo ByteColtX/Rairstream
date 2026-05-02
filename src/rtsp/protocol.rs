@@ -1,7 +1,10 @@
+//! `RTSP` 报文模型、编解码与握手请求构造。
+
 use std::fmt::Write;
 use std::net::UdpSocket;
 
-use super::{AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, SessionDescriptor};
+use crate::audio::{CodecDescription, RAOP_STARTUP_LATENCY_FRAMES};
+use crate::session::{AirPlayError, SessionDescriptor};
 
 /// `RTSP` 请求方法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,20 +150,20 @@ impl RtspResponse {
     pub fn parse_parts(head: &str, body: Vec<u8>) -> Result<Self, AirPlayError> {
         let mut lines = head.split("\r\n");
         let status_line = lines.next().ok_or_else(|| AirPlayError::Protocol {
-            message: String::from("缺少 RTSP 状态行"),
+            message: String::from("missing RTSP status line"),
         })?;
         let mut status_parts = status_line.splitn(3, ' ');
         let _version = status_parts.next().ok_or_else(|| AirPlayError::Protocol {
-            message: String::from("RTSP 状态行缺少版本"),
+            message: String::from("RTSP status line is missing the version"),
         })?;
         let code = status_parts
             .next()
             .ok_or_else(|| AirPlayError::Protocol {
-                message: String::from("RTSP 状态行缺少状态码"),
+                message: String::from("RTSP status line is missing the status code"),
             })?
             .parse::<u16>()
             .map_err(|_| AirPlayError::Protocol {
-                message: format!("RTSP 状态码无效: {status_line}"),
+                message: format!("invalid RTSP status code: {status_line}"),
             })?;
         let reason_phrase = String::from(status_parts.next().unwrap_or(""));
 
@@ -172,7 +175,7 @@ impl RtspResponse {
 
             let Some((name, value)) = line.split_once(':') else {
                 return Err(AirPlayError::Protocol {
-                    message: format!("RTSP 头格式无效: {line}"),
+                    message: format!("invalid RTSP header line: {line}"),
                 });
             };
             headers.insert(name.trim(), value.trim());
@@ -390,7 +393,7 @@ pub fn build_keepalive_request(
 pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayError> {
     if !response.is_success() {
         return Err(AirPlayError::Protocol {
-            message: format!("SETUP 返回了失败状态码 {}", response.status.code),
+            message: format!("SETUP returned failure status {}", response.status.code),
         });
     }
 
@@ -398,7 +401,7 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
         .headers
         .get("Session")
         .ok_or_else(|| AirPlayError::Protocol {
-            message: String::from("SETUP 响应缺少 Session 头"),
+            message: String::from("SETUP response is missing the Session header"),
         })?;
     let session_id = session_header
         .split(';')
@@ -409,7 +412,7 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
 
     if session_id.is_empty() {
         return Err(AirPlayError::Protocol {
-            message: String::from("SETUP 响应中的 Session 为空"),
+            message: String::from("SETUP response contained an empty Session header"),
         });
     }
 
@@ -417,7 +420,7 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
         .headers
         .get("Transport")
         .ok_or_else(|| AirPlayError::Protocol {
-            message: String::from("SETUP 响应缺少 Transport 头"),
+            message: String::from("SETUP response is missing the Transport header"),
         })?;
 
     Ok(SetupReply {
@@ -484,11 +487,11 @@ fn parse_transport_port(transport: &str, field_name: &str) -> Result<u16, AirPla
             (name.trim() == field_name).then_some(value.trim())
         })
         .ok_or_else(|| AirPlayError::Protocol {
-            message: format!("Transport 头缺少 {field_name}"),
+            message: format!("Transport header is missing {field_name}"),
         })?;
 
     value.parse::<u16>().map_err(|_| AirPlayError::Protocol {
-        message: format!("Transport 头中的 {field_name} 不是有效端口: {value}"),
+        message: format!("Transport header field {field_name} is not a valid port: {value}"),
     })
 }
 
@@ -512,13 +515,13 @@ mod tests {
         parse_setup_reply,
     };
     use crate::audio::AudioFormat;
+    use crate::audio::{
+        CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
+    };
     use crate::receiver::{
-        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+        AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
-    use crate::transport::{
-        AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
-        SessionDescriptor,
-    };
+    use crate::session::{AirPlayError, SessionDescriptor};
 
     fn build_descriptor() -> SessionDescriptor {
         SessionDescriptor::new(
@@ -528,12 +531,13 @@ mod tests {
                 host: String::from("speaker.local"),
                 port: 7000,
                 generation: AirPlayGeneration::AirPlay1,
-                pairing_id: None,
-                receiver_public_key: None,
-                receiver_kind: ReceiverKind::ClassicRaop,
-                support: DeviceSupport::Supported,
+                transport_profile: ReceiverKind::ClassicRaop,
+                support_level: DeviceSupport::Supported,
+                auth_method: AuthMethod::None,
                 capabilities: ReceiverCapabilities::default(),
-            },
+                ..Receiver::default()
+            }
+            .with_compat_fields(),
             AudioFormat::default(),
         )
     }

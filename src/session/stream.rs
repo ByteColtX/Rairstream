@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,11 +28,14 @@ impl PlaybackSession {
     }
 }
 
-pub fn play_capture(
+pub fn play_capture<S>(
     receivers: &[Receiver],
-    paired_receivers: &HashMap<String, ReceiverCredentials>,
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
-) -> Result<PlaybackSession, RairstreamError> {
+) -> Result<PlaybackSession, RairstreamError>
+where
+    S: BuildHasher,
+{
     let format = WindowsLoopbackCapture::preferred_format()?;
     let connections =
         connect_receivers(receivers, format, paired_receivers, sender_volume_percent)?;
@@ -54,12 +58,15 @@ pub fn play_capture(
     })
 }
 
-pub fn play_file(
+pub fn play_file<S>(
     path: &Path,
     receivers: &[Receiver],
-    paired_receivers: &HashMap<String, ReceiverCredentials>,
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
-) -> Result<(), RairstreamError> {
+) -> Result<(), RairstreamError>
+where
+    S: BuildHasher,
+{
     let mut decoder = FileChunkDecoder::open(path)?;
     let Some(first_chunk) = decoder.next_chunk()? else {
         return Err(RairstreamError::InvalidInput {
@@ -106,7 +113,16 @@ fn chunk_duration(chunk: &AudioChunk) -> Duration {
         return Duration::ZERO;
     }
 
-    Duration::from_secs_f64(chunk.frames as f64 / f64::from(chunk.format.sample_rate_hz))
+    let frames = chunk.frames as u128;
+    let sample_rate = u128::from(chunk.format.sample_rate_hz);
+    let total_nanos = frames.saturating_mul(1_000_000_000) / sample_rate;
+    let seconds = total_nanos / 1_000_000_000;
+    let nanos = total_nanos % 1_000_000_000;
+
+    Duration::new(
+        u64::try_from(seconds).unwrap_or(u64::MAX),
+        u32::try_from(nanos).unwrap_or(999_999_999),
+    )
 }
 
 fn sleep_until(start: Instant, played: Duration) {
@@ -166,7 +182,7 @@ fn fail_after_cleanup<T>(
 }
 
 fn teardown_connections(connections: Vec<ConnectedReceiver>) -> Result<(), RairstreamError> {
-    let mut first_error = None;
+    let mut first_error: Option<crate::session::AirPlayError> = None;
     for connection in connections {
         if let Err(error) = connection.connection.teardown() {
             if first_error.is_none() {
@@ -264,7 +280,7 @@ mod tests {
         impl AudioSink for FailingSink {
             fn write(&mut self, _chunk: AudioChunk) -> Result<(), AudioCaptureError> {
                 Err(AudioCaptureError::InvalidFormat {
-                    message: String::from("sink rejected chunk"),
+                    message: String::from("audio sink rejected chunk"),
                 })
             }
         }

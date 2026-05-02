@@ -1,15 +1,28 @@
+//! `RAOP` 音频 `sink`，负责 packet 序列化与 UDP 发送。
+
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 
-use crate::audio::{AudioCaptureError, AudioChunk, AudioSink};
+use crate::audio::{
+    AudioCaptureError, AudioChunk, AudioResampler, AudioSink, RAOP_FRAMES_PER_PACKET,
+};
 use crate::timing::clock::ntp_timestamp_now;
 
-use super::RAOP_FRAMES_PER_PACKET;
-use super::codec::AudioResampler;
-use super::packet::{RaopSyncPacket, RtpAudioPacket};
-use super::session::RaopStreamTransport;
+use super::packet::{RaopPacketCounters, RaopSyncPacket, RtpAudioPacket};
 use tracing::{debug, trace, warn};
 
 const RAOP_AUDIO_PAYLOAD_TYPE: u8 = 96;
+
+#[derive(Debug)]
+pub struct RaopStreamTransport {
+    pub audio_socket: UdpSocket,
+    pub control_socket: UdpSocket,
+    pub audio_target: SocketAddr,
+    pub control_target: SocketAddr,
+    pub audio_ssrc: u32,
+    pub packet_counters: RaopPacketCounters,
+    pub sink_config: RaopSinkConfig,
+}
 
 /// `RAOP` 音频发送端的最小配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +42,7 @@ impl Default for RaopSinkConfig {
     }
 }
 
+/// 将统一 `AudioChunk` 转成 `RAOP` RTP 包并持续发送到目标设备。
 #[derive(Debug)]
 pub struct RaopAudioSink {
     resampler: AudioResampler,
@@ -53,13 +67,12 @@ impl RaopAudioSink {
             audio_target = %transport.audio_target,
             control_target = %transport.control_target,
             sync_interval_packets = transport.sink_config.sync_interval_packets,
-            "初始化 RAOP 音频发送端"
+            "initializing RAOP audio sink"
         );
         let mut resampler = AudioResampler::new(source_format);
         let initial_sender_volume_percent = sender_volume_percent
             .lock()
-            .map(|sender_volume_percent| *sender_volume_percent)
-            .unwrap_or(100);
+            .map_or(100, |sender_volume_percent| *sender_volume_percent);
         resampler.set_sender_volume_percent(initial_sender_volume_percent);
         Self {
             resampler,
@@ -103,7 +116,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 payload_bytes = bytes.len(),
                 target = %self.transport.audio_target,
-                "发送 RTP 音频包"
+                "sending RTP audio packet"
             );
         }
         if self.first_packet_in_stream
@@ -115,7 +128,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 payload_bytes = bytes.len(),
                 target = %self.transport.audio_target,
-                "发送 RTP 音频包摘要"
+                "sending RTP audio packet summary"
             );
         }
         self.transport
@@ -127,7 +140,7 @@ impl RaopAudioSink {
                     rtp_timestamp = timestamp,
                     target = %self.transport.audio_target,
                     error = %error,
-                    "发送 RTP 音频包失败"
+                    "failed to send RTP audio packet"
                 );
                 AudioCaptureError::RuntimeInitialization {
                     message: error.to_string(),
@@ -161,7 +174,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 next_rtp_timestamp,
                 target = %self.transport.control_target,
-                "发送 RAOP 同步包"
+                "sending RAOP sync packet"
             );
         }
         trace!(
@@ -170,7 +183,7 @@ impl RaopAudioSink {
             next_rtp_timestamp,
             packet_index = self.sent_audio_packets.saturating_add(1),
             target = %self.transport.control_target,
-            "发送 RAOP 同步包"
+            "sending RAOP sync packet"
         );
         self.transport
             .control_socket
@@ -181,7 +194,7 @@ impl RaopAudioSink {
                     rtp_timestamp = timestamp,
                     target = %self.transport.control_target,
                     error = %error,
-                    "发送 RAOP 同步包失败"
+                    "failed to send RAOP sync packet"
                 );
                 AudioCaptureError::RuntimeInitialization {
                     message: error.to_string(),
@@ -214,9 +227,8 @@ mod tests {
 
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType, AudioSink};
 
-    use super::{RaopAudioSink, RaopSinkConfig};
+    use super::{RaopAudioSink, RaopSinkConfig, RaopStreamTransport};
     use crate::transport::packet::RaopPacketCounters;
-    use crate::transport::session::RaopStreamTransport;
     use std::sync::{Arc, Mutex};
 
     #[test]

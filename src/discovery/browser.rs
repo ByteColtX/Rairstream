@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, TxtProperty};
@@ -51,7 +52,7 @@ impl DiscoveryService for MdnsDiscoveryService {
             self.timeout,
         ));
 
-        parse_resolved_services(services)
+        parse_resolved_services(&services)
     }
 }
 
@@ -68,35 +69,13 @@ fn discover_service_type(
     let deadline = Instant::now() + timeout;
     let mut services = Vec::new();
 
-    loop {
-        let Some(wait_time) = deadline.checked_duration_since(Instant::now()) else {
-            break;
-        };
-
+    while let Some(wait_time) = deadline.checked_duration_since(Instant::now()) {
         let Ok(event) = receiver.recv_timeout(wait_time) else {
             break;
         };
 
         if let ServiceEvent::ServiceResolved(service) = event {
-            let device_id = service.get_property_val_str("deviceid").map(String::from);
-            let pairing_id = service
-                .get_property_val_str("pi")
-                .or_else(|| service.get_property_val_str("gid"))
-                .map(String::from);
-            let model_or_am = service
-                .get_property_val_str("am")
-                .or_else(|| service.get_property_val_str("model"))
-                .map(String::from);
-            let features = service.get_property_val_str("features").map(String::from);
-            let flags = service
-                .get_property_val_str("flags")
-                .or_else(|| service.get_property_val_str("sf"))
-                .map(String::from);
-            let srcvers = service
-                .get_property_val_str("srcvers")
-                .or_else(|| service.get_property_val_str("vs"))
-                .map(String::from);
-            let receiver_public_key = service.get_property_val_str("pk").map(String::from);
+            let txt_records = collect_txt_records(service.get_properties().iter());
             let ipv4_addresses = service.get_addresses_v4().into_iter().collect();
             let txt_properties = format_txt_properties(service.get_properties().iter());
             trace!(
@@ -114,13 +93,7 @@ fn discover_service_type(
                 fullname: service.fullname,
                 port: service.port,
                 ipv4_addresses,
-                device_id,
-                pairing_id,
-                model_or_am,
-                features,
-                flags,
-                srcvers,
-                receiver_public_key,
+                txt_records,
             });
         }
     }
@@ -128,6 +101,19 @@ fn discover_service_type(
     let _ = daemon.stop_browse(service_type);
 
     services
+}
+
+fn collect_txt_records<'a>(
+    properties: impl Iterator<Item = &'a TxtProperty>,
+) -> BTreeMap<String, String> {
+    properties
+        .map(|property| {
+            let value = property
+                .val()
+                .map_or_else(String::new, |_| property.val_str().to_string());
+            (property.key().to_ascii_lowercase(), value)
+        })
+        .collect()
 }
 
 fn format_txt_properties<'a>(properties: impl Iterator<Item = &'a TxtProperty>) -> String {

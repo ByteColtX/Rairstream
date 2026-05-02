@@ -1,6 +1,5 @@
-pub mod airplay2;
-pub mod client;
-pub mod events;
-pub mod headers;
-pub mod plist;
-pub mod raop;
+pub(crate) mod client;
+pub mod protocol;
+
+pub(crate) use client::{RtspClient, RtspKeepalive};
+pub use protocol::*;

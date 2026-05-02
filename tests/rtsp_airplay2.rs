@@ -1,4 +1,4 @@
-use rairstream::rtsp::airplay2::ModernAirPlaySession;
+use rairstream::session::ModernAirPlaySession;
 
 #[test]
 fn airplay2_transport_name_remains_stable() {

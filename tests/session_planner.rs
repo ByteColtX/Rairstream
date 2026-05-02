@@ -1,6 +1,6 @@
 use rairstream::audio::AudioFormat;
 use rairstream::receiver::{
-    AirPlayGeneration, CodecKind, DeviceSupport, PairingRequirement, Receiver,
+    AirPlayGeneration, AuthMethod, CodecKind, DeviceSupport, PairingRequirement, Receiver,
     ReceiverCapabilities, ReceiverKind,
 };
 use rairstream::session::{PlannedTransport, plan_session};
@@ -13,10 +13,11 @@ fn planner_routes_modern_receiver_to_airplay2() {
         host: String::from("192.168.1.10"),
         port: 7000,
         generation: AirPlayGeneration::AirPlay2,
-        pairing_id: Some(String::from("pairing-id")),
+        transport_profile: ReceiverKind::ModernAirPlayAuth,
+        support_level: DeviceSupport::Supported,
+        auth_method: AuthMethod::LegacyPin,
+        pairing_identity: Some(String::from("pairing-id")),
         receiver_public_key: Some(String::from("public-key")),
-        receiver_kind: ReceiverKind::ModernAirPlayAuth,
-        support: DeviceSupport::Supported,
         capabilities: ReceiverCapabilities {
             codecs: vec![CodecKind::Alac, CodecKind::Aac, CodecKind::L16],
             pairing: PairingRequirement::PinOrCredentials,
@@ -24,7 +25,9 @@ fn planner_routes_modern_receiver_to_airplay2() {
             supports_ptp: true,
             supports_retransmit: true,
         },
-    };
+        ..Receiver::default()
+    }
+    .with_compat_fields();
 
     let plan = plan_session(&receiver, AudioFormat::default());
 

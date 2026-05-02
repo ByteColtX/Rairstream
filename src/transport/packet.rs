@@ -1,3 +1,5 @@
+//! `RAOP` RTP packet 与计数器模型。
+
 /// `RAOP` 音频流的 RTP 计数器。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaopPacketCounters {
@@ -15,12 +17,13 @@ impl RaopPacketCounters {
     }
 
     #[must_use]
-    pub fn peek_audio_packet(&self) -> (u16, u32) {
+    pub fn peek_audio_packet(self) -> (u16, u32) {
         (self.next_sequence, self.next_timestamp)
     }
 
     pub fn allocate_audio_packet(&mut self, frames: usize) -> Result<(u16, u32), &'static str> {
-        let frames = u32::try_from(frames).map_err(|_| "音频帧数超出 RAOP RTP 时间戳范围")?;
+        let frames = u32::try_from(frames)
+            .map_err(|_| "audio frame count exceeds RAOP RTP timestamp range")?;
         let sequence = self.next_sequence;
         let timestamp = self.next_timestamp;
 

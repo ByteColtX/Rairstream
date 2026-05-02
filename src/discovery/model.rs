@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,11 +13,17 @@ pub struct ResolvedMdnsService {
     pub fullname: String,
     pub port: u16,
     pub ipv4_addresses: Vec<Ipv4Addr>,
-    pub device_id: Option<String>,
-    pub pairing_id: Option<String>,
-    pub model_or_am: Option<String>,
-    pub features: Option<String>,
-    pub flags: Option<String>,
-    pub srcvers: Option<String>,
-    pub receiver_public_key: Option<String>,
+    pub txt_records: BTreeMap<String, String>,
+}
+
+impl ResolvedMdnsService {
+    #[must_use]
+    pub fn txt_value(&self, key: &str) -> Option<&str> {
+        self.txt_records.get(key).map(String::as_str)
+    }
+
+    #[must_use]
+    pub fn txt_value_any<'a>(&'a self, keys: &[&str]) -> Option<&'a str> {
+        keys.iter().find_map(|key| self.txt_value(key))
+    }
 }

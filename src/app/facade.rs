@@ -56,7 +56,7 @@ where
         self.state.session = SessionState::Discovering;
         let mut receivers = self.discovery.discover_devices();
         sort_receivers(&mut receivers);
-        self.state.last_receivers = receivers.clone();
+        self.state.last_receivers.clone_from(&receivers);
         receiver_cache::cache_receivers(&mut self.config, &receivers);
         let persist_result = self.persist_config();
         self.state.session = SessionState::Idle;
@@ -139,7 +139,7 @@ where
         let receiver_id = self.resolve_cached_receiver_id(selector_text)?;
         if !self.config.paired_receivers.contains_key(&receiver_id) {
             return Err(RairstreamError::InvalidInput {
-                message: format!("receiver `{selector_text}` has no stored pairing"),
+                message: format!("receiver `{selector_text}` has no saved pairing"),
             });
         }
         let entry = self.build_paired_entry(&receiver_id);
@@ -317,7 +317,7 @@ mod tests {
     use crate::config::AppConfig;
     use crate::pairing::{ReceiverAuthFlow, ReceiverCredentials};
     use crate::receiver::{
-        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+        AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
 
     use super::{AppFacade, DiscoveryService, SessionState, save_config};
@@ -348,12 +348,13 @@ mod tests {
             host: host.to_string(),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
-            pairing_id: None,
-            receiver_public_key: None,
-            receiver_kind: ReceiverKind::ClassicRaop,
-            support: DeviceSupport::Supported,
+            transport_profile: ReceiverKind::ClassicRaop,
+            support_level: DeviceSupport::Supported,
+            auth_method: AuthMethod::None,
             capabilities: ReceiverCapabilities::default(),
+            ..Receiver::default()
         }
+        .with_compat_fields()
     }
 
     fn paired_credentials(auth_flow: ReceiverAuthFlow) -> ReceiverCredentials {
@@ -420,6 +421,7 @@ mod tests {
             name: String::from("Zed"),
             host: String::from("192.168.1.40"),
             port: 7000,
+            transport_profile: ReceiverKind::ClassicRaop,
             receiver_kind: ReceiverKind::ClassicRaop,
         });
         config.upsert_receiver_cache(crate::config::CachedReceiver {
@@ -427,6 +429,7 @@ mod tests {
             name: String::from("Alpha"),
             host: String::from("192.168.1.20"),
             port: 7000,
+            transport_profile: ReceiverKind::ClassicRaop,
             receiver_kind: ReceiverKind::ClassicRaop,
         });
         save_config(&path, &config).unwrap();
@@ -456,6 +459,7 @@ mod tests {
             name: String::from("Kitchen"),
             host: String::from("192.168.1.30"),
             port: 7000,
+            transport_profile: ReceiverKind::ClassicRaop,
             receiver_kind: ReceiverKind::ClassicRaop,
         });
         save_config(&path, &config).unwrap();
@@ -484,6 +488,7 @@ mod tests {
             name: String::from("Office"),
             host: String::from("192.168.1.50"),
             port: 7000,
+            transport_profile: ReceiverKind::ClassicRaop,
             receiver_kind: ReceiverKind::ClassicRaop,
         });
         save_config(&path, &config).unwrap();
@@ -500,7 +505,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "invalid input: receiver `Office` has no stored pairing"
+            "invalid input: receiver `Office` has no saved pairing"
         );
         let _ = std::fs::remove_file(path);
     }

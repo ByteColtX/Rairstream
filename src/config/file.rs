@@ -1,3 +1,5 @@
+//! 配置文件的加载、保存与默认路径解析。
+
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -9,6 +11,7 @@ use super::model::AppConfig;
 const CONFIG_DIR_NAME: &str = "Rairstream";
 const CONFIG_FILE_NAME: &str = "config.json";
 
+#[must_use]
 pub fn default_config_path() -> PathBuf {
     default_config_dir().join(CONFIG_FILE_NAME)
 }

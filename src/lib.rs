@@ -13,5 +13,6 @@ pub mod platform;
 pub mod receiver;
 pub mod rtsp;
 pub mod session;
-pub mod storage;
 pub mod timing;
+
+mod storage;

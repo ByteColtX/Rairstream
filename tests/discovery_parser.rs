@@ -24,6 +24,16 @@ fn build_service(
         flags: None,
         srcvers: None,
         receiver_public_key: None,
+        system_pairing_identity: None,
+        raop_codecs: None,
+        raop_encryption_types: None,
+        raop_transport: None,
+        raop_metadata_types: None,
+        group_public_name: None,
+        group_id: None,
+        home_group_id: None,
+        household_id: None,
+        parent_group_id: None,
     }
 }
 

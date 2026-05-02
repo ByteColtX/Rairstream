@@ -26,13 +26,12 @@ pub fn run_cli(cli: CliOptions) -> Result<(), RairstreamError> {
             Ok(())
         }
         CliCommand::Pair { selector, pin } => {
-            let pin = match pin {
-                Some(pin) => pin,
-                None => {
-                    let receiver = facade.request_pairing_pin_display(&selector)?;
-                    print_pairing_pin_requested(&receiver.name);
-                    prompt_pairing_pin(&receiver.name)?
-                }
+            let pin = if let Some(pin) = pin {
+                pin
+            } else {
+                let receiver = facade.request_pairing_pin_display(&selector)?;
+                print_pairing_pin_requested(&receiver.name);
+                prompt_pairing_pin(&receiver.name)?
             };
             let result = facade.pair(&selector, &pin)?;
             print_paired_saved(&result);

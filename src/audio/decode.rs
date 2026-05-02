@@ -1,3 +1,5 @@
+//! 文件播放路径的 `decode` 层，负责把 `symphonia` 输出转成统一 `AudioChunk`。
+
 use std::fs::File;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -6,14 +8,15 @@ use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{Decoder, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader};
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::default::{get_codecs, get_probe};
 
-use crate::audio::convert::audio_buffer_ref_to_chunk;
+use super::convert::audio_buffer_ref_to_chunk;
 use crate::audio::{AudioCaptureError, AudioChunk, AudioFormat};
 
+/// 顺序读取音频文件并持续输出统一格式的数据块。
 pub struct FileChunkDecoder {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn Decoder>,
@@ -23,11 +26,13 @@ pub struct FileChunkDecoder {
 }
 
 impl FileChunkDecoder {
+    /// 打开音频文件并初始化 `symphonia` 解码器。
     pub fn open(path: &Path) -> Result<Self, AudioCaptureError> {
         let file = File::open(path).map_err(|error| AudioCaptureError::RuntimeInitialization {
             message: format!("failed to open `{}`: {error}", path.display()),
         })?;
-        let media_source = MediaSourceStream::new(Box::new(file), Default::default());
+        let media_source =
+            MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
         let mut hint = Hint::new();
         if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
             hint.with_extension(extension);
@@ -41,7 +46,7 @@ impl FileChunkDecoder {
                 &MetadataOptions::default(),
             )
             .map_err(|error| AudioCaptureError::RuntimeInitialization {
-                message: format!("failed to probe `{}`: {error}", path.display()),
+                message: format!("failed to probe format for `{}`: {error}", path.display()),
             })?;
         let format = probed.format;
         let (track_id, decoder) = {
@@ -55,7 +60,7 @@ impl FileChunkDecoder {
                 })
                 .ok_or_else(|| AudioCaptureError::InvalidFormat {
                     message: format!(
-                        "file `{}` did not contain a decodable audio track",
+                        "audio file `{}` did not contain a decodable audio track",
                         path.display()
                     ),
                 })?;
@@ -77,6 +82,7 @@ impl FileChunkDecoder {
         })
     }
 
+    /// 拉取下一个可播放的数据块；到达文件结尾时返回 `Ok(None)`。
     pub fn next_chunk(&mut self) -> Result<Option<AudioChunk>, AudioCaptureError> {
         if self.exhausted {
             return Ok(None);
@@ -142,7 +148,7 @@ impl FileChunkDecoder {
 fn decoder_reset_error() -> AudioCaptureError {
     AudioCaptureError::InvalidFormat {
         message: String::from(
-            "decoded audio format changed mid-stream and requires a decoder reset",
+            "decoded audio format changed mid-stream and requires rebuilding the decoder",
         ),
     }
 }
