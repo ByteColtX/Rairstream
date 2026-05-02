@@ -1,5 +1,10 @@
 //! 音频采集层：对上层暴露统一的输入抽象。
 
+pub mod codecs;
+pub mod convert;
+pub mod decode;
+pub mod source;
+
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -8,6 +13,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
+
+pub use crate::transport::AudioResampler;
+pub use decode::FileChunkDecoder;
 
 /// PCM 样本的数据语义。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,13 +259,6 @@ impl WindowsLoopbackCapture {
         {
             Err(AudioCaptureError::UnsupportedPlatform)
         }
-    }
-
-    pub fn start<S>(sink: S) -> Result<RunningCapture, AudioCaptureError>
-    where
-        S: AudioSink,
-    {
-        Self::start_with_config(sink, CaptureConfig::default())
     }
 
     pub fn start_with_config<S>(

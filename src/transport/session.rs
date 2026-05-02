@@ -38,8 +38,9 @@ use super::rtsp::{
     parse_setup_reply,
 };
 use super::{AirPlayError, RAOP_STARTUP_LATENCY_FRAMES, RaopSinkConfig, SessionDescriptor};
-use crate::app::ReceiverKind;
 use crate::config::{ReceiverAuthFlow, ReceiverCredentials};
+use crate::receiver::ReceiverKind;
+use crate::timing::clock::ntp_timestamp_now;
 use tracing::{debug, info, trace, warn};
 
 const RTSP_IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -178,6 +179,13 @@ impl PreparedTransportSession {
         match self {
             Self::ClassicRaop(_) => Err(AirPlayError::AuthenticationRequired),
             Self::ModernAirPlay(session) => session.pair_with_pin(pin),
+        }
+    }
+
+    pub fn request_pairing_pin_display(self) -> Result<(), AirPlayError> {
+        match self {
+            Self::ClassicRaop(_) => Err(AirPlayError::AuthenticationRequired),
+            Self::ModernAirPlay(session) => session.request_pairing_pin_display(),
         }
     }
 }
@@ -479,6 +487,28 @@ impl ModernAirPlaySession {
             "AirPlay Receiver 首配前 /info 已返回响应"
         );
         complete_legacy_pairing(&mut rtsp_client, &mut self, pin)
+    }
+
+    pub fn request_pairing_pin_display(mut self) -> Result<(), AirPlayError> {
+        let endpoint = self.descriptor.device.endpoint();
+        info!(
+            endpoint = %endpoint,
+            device_id = %self.descriptor.device.id,
+            "开始请求 AirPlay Receiver 显示配对 PIN"
+        );
+        let mut rtsp_client = RtspClient::connect(&endpoint)?;
+        let _info_response = rtsp_client.send(&self.info_request())?;
+        debug!(
+            endpoint = %endpoint,
+            "AirPlay Receiver 弹码前 /info 已返回响应"
+        );
+        let pair_pin_start_response = rtsp_client.send(&self.pair_pin_start_request())?;
+        debug!(
+            endpoint = %endpoint,
+            status_code = pair_pin_start_response.status.code,
+            "AirPlay Receiver 弹码请求 /pair-pin-start"
+        );
+        map_pair_pin_start_response(&pair_pin_start_response)
     }
 
     #[must_use]
@@ -1697,7 +1727,7 @@ fn complete_legacy_pair_verify(
 }
 
 fn receiver_pairing_id_from_device(
-    device: &crate::app::SpeakerDevice,
+    device: &crate::receiver::Receiver,
 ) -> Result<String, AirPlayError> {
     device
         .pairing_id
@@ -2044,7 +2074,7 @@ fn build_pair_verify_nonce(nonce_suffix: &[u8]) -> Result<Nonce, AirPlayError> {
 
 fn decode_receiver_credentials(
     receiver_credentials: &ReceiverCredentials,
-    device: &crate::app::SpeakerDevice,
+    device: &crate::receiver::Receiver,
 ) -> Result<DecodedReceiverCredentials, AirPlayError> {
     let controller_ltsk = decode_hex_bytes(
         &receiver_credentials.controller_ltsk_hex,
@@ -2237,16 +2267,6 @@ fn map_connection_error(error: std::io::Error) -> AirPlayError {
     AirPlayError::ConnectionFailed { message }
 }
 
-fn ntp_timestamp_now() -> u64 {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let seconds = duration.as_secs().saturating_add(2_208_988_800);
-    let fractional = ((u128::from(duration.subsec_nanos())) << 32) / 1_000_000_000_u128;
-
-    (seconds << 32) | u64::try_from(fractional).unwrap_or(u64::MAX)
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
@@ -2263,9 +2283,11 @@ mod tests {
         decode_fixed_32, derive_hkdf_sha512, encrypt_pair_verify_payload,
         map_pair_pin_start_response,
     };
-    use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::{AudioFormat, AudioSampleType};
     use crate::config::{ReceiverAuthFlow, ReceiverCredentials};
+    use crate::receiver::{
+        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+    };
     use crate::transport::AirPlayError;
     use crate::transport::RAOP_STARTUP_LATENCY_FRAMES;
     use crate::transport::RtspResponse;
@@ -2281,7 +2303,7 @@ mod tests {
 
     fn build_descriptor(format: AudioFormat) -> SessionDescriptor {
         SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2291,6 +2313,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             format,
         )
@@ -2352,7 +2375,7 @@ mod tests {
     #[test]
     fn modern_session_connects_for_modern_receiver() {
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2362,6 +2385,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -2378,7 +2402,7 @@ mod tests {
     #[test]
     fn modern_session_request_builders_advance_cseq() {
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2388,6 +2412,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -2433,13 +2458,13 @@ mod tests {
     }
 
     #[test]
-    fn modern_handshake_maps_info_status_to_pairing_required() {
+    fn request_pairing_pin_display_probes_info_and_pair_pin_start() {
         let (server, recorded_requests) = FakeRtspServer::spawn(vec![
-            String::from("RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\n\r\n"),
+            String::from("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"),
             String::from("RTSP/1.0 200 OK\r\nCSeq: 2\r\n\r\n"),
         ]);
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2449,6 +2474,42 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
+            },
+            AudioFormat::default(),
+        );
+
+        PreparedTransportSession::prepare(&descriptor)
+            .unwrap()
+            .request_pairing_pin_display()
+            .unwrap();
+
+        let requests = recorded_requests
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /info RTSP/1.0"));
+        assert!(requests[1].starts_with("POST /pair-pin-start RTSP/1.0"));
+    }
+
+    #[test]
+    fn modern_handshake_maps_info_status_to_pairing_required() {
+        let (server, recorded_requests) = FakeRtspServer::spawn(vec![
+            String::from("RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\n\r\n"),
+            String::from("RTSP/1.0 200 OK\r\nCSeq: 2\r\n\r\n"),
+        ]);
+        let descriptor = SessionDescriptor::new(
+            Receiver {
+                id: String::from("speaker"),
+                name: String::from("Speaker"),
+                host: String::from("127.0.0.1"),
+                port: server.port(),
+                generation: AirPlayGeneration::AirPlay1,
+                pairing_id: None,
+                receiver_public_key: None,
+                receiver_kind: ReceiverKind::ModernAirPlayAuth,
+                support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -2474,7 +2535,7 @@ mod tests {
             String::from("RTSP/1.0 470 Connection Authorization Required\r\nCSeq: 2\r\n\r\n"),
         ]);
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2484,6 +2545,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -2503,7 +2565,7 @@ mod tests {
             String::from("RTSP/1.0 200 OK\r\nCSeq: 2\r\n\r\n"),
         ]);
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -2513,6 +2575,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -3043,7 +3106,7 @@ mod tests {
         receiver_ltpk: [u8; 32],
     ) -> SessionDescriptor {
         SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3053,6 +3116,7 @@ mod tests {
                 receiver_public_key: Some(hex::encode(receiver_ltpk)),
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         )
@@ -3166,7 +3230,7 @@ mod tests {
         let receiver_signing_key = SigningKey::from_bytes(&[9_u8; 32]);
         let (port, rx) = spawn_modern_pairing_server("1234");
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3178,6 +3242,7 @@ mod tests {
                 )),
                 receiver_kind: ReceiverKind::ModernAirPlayAuth,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -3412,7 +3477,7 @@ mod tests {
             String::from("RTSP/1.0 200 OK\r\nSession: deadbeef\r\n\r\n"),
         ]);
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3422,6 +3487,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -3535,7 +3601,7 @@ mod tests {
         });
 
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3545,6 +3611,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -3728,7 +3795,7 @@ mod tests {
         });
 
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3738,6 +3805,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );
@@ -3761,7 +3829,7 @@ mod tests {
         let (server, _recorded_requests) =
             FakeRtspServer::spawn(vec![String::from("RTSP/1.0 401 Unauthorized\r\n\r\n")]);
         let descriptor = SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker"),
                 name: String::from("Speaker"),
                 host: String::from("127.0.0.1"),
@@ -3771,6 +3839,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         );

@@ -1,0 +1,335 @@
+use std::path::PathBuf;
+
+use crate::error::RairstreamError;
+
+const CLI_USAGE: &str = "usage: discover | inspect --device <selector> | pair --device <selector> [--pin <PIN>] | paired list | paired forget --device <selector> | play file <path> --device <selector>... | play capture --device <selector>...";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliCommand {
+    Discover,
+    Inspect {
+        selector: String,
+    },
+    Pair {
+        selector: String,
+        pin: Option<String>,
+    },
+    PairedList,
+    PairedForget {
+        selector: String,
+    },
+    PlayFile {
+        path: PathBuf,
+        selectors: Vec<String>,
+    },
+    PlayCapture {
+        selectors: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliOptions {
+    pub command: CliCommand,
+    pub log_level: Option<String>,
+    pub verbosity: u8,
+}
+
+impl CliOptions {
+    #[must_use]
+    pub fn log_filter(&self) -> &str {
+        self.log_level.as_deref().unwrap_or(match self.verbosity {
+            0 => "info",
+            1 => "debug",
+            _ => "trace",
+        })
+    }
+}
+
+pub fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<CliOptions, RairstreamError> {
+    let mut args = args.into_iter().peekable();
+    let mut verbosity = 0_u8;
+    let mut log_level = None;
+    let mut positionals = Vec::new();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-v" | "--verbose" => verbosity = verbosity.saturating_add(1),
+            "-vv" => verbosity = verbosity.saturating_add(2),
+            "--log-level" => {
+                let value = args.next().ok_or_else(|| RairstreamError::InvalidCli {
+                    message: String::from("--log-level requires a value"),
+                })?;
+                log_level = Some(parse_log_level(value)?);
+            }
+            _ if arg.starts_with("--log-level=") => {
+                log_level = Some(parse_log_level(
+                    arg.trim_start_matches("--log-level=").to_string(),
+                )?);
+            }
+            _ => positionals.push(arg),
+        }
+    }
+
+    let command = parse_command(&positionals)?;
+    Ok(CliOptions {
+        command,
+        log_level,
+        verbosity,
+    })
+}
+
+fn parse_log_level(value: String) -> Result<String, RairstreamError> {
+    match value.as_str() {
+        "error" | "warn" | "info" | "debug" | "trace" => Ok(value),
+        _ => Err(RairstreamError::InvalidCli {
+            message: format!("unsupported log level `{value}`"),
+        }),
+    }
+}
+
+fn parse_command(args: &[String]) -> Result<CliCommand, RairstreamError> {
+    let Some((command, tail)) = args.split_first() else {
+        return Err(usage_error());
+    };
+
+    match command.as_str() {
+        "discover" => {
+            ensure_no_remaining_args(tail)?;
+            Ok(CliCommand::Discover)
+        }
+        "inspect" => {
+            let (selector, tail) = parse_device_selector(tail)?;
+            ensure_no_remaining_args(tail)?;
+            Ok(CliCommand::Inspect { selector })
+        }
+        "pair" => {
+            let (selector, tail) = parse_device_selector(tail)?;
+            let pin = parse_optional_pin(tail)?;
+            Ok(CliCommand::Pair { selector, pin })
+        }
+        "paired" => parse_paired_command(tail),
+        "play" => parse_play_command(tail),
+        _ => Err(usage_error()),
+    }
+}
+
+fn parse_paired_command(args: &[String]) -> Result<CliCommand, RairstreamError> {
+    let Some((subcommand, tail)) = args.split_first() else {
+        return Err(usage_error());
+    };
+
+    match subcommand.as_str() {
+        "list" => {
+            ensure_no_remaining_args(tail)?;
+            Ok(CliCommand::PairedList)
+        }
+        "forget" => {
+            let (selector, tail) = parse_device_selector(tail)?;
+            ensure_no_remaining_args(tail)?;
+            Ok(CliCommand::PairedForget { selector })
+        }
+        _ => Err(usage_error()),
+    }
+}
+
+fn parse_play_command(args: &[String]) -> Result<CliCommand, RairstreamError> {
+    let Some((subcommand, tail)) = args.split_first() else {
+        return Err(usage_error());
+    };
+
+    match subcommand.as_str() {
+        "file" => {
+            let Some((path, selectors)) = tail.split_first() else {
+                return Err(usage_error());
+            };
+            Ok(CliCommand::PlayFile {
+                path: PathBuf::from(path),
+                selectors: parse_device_selectors(selectors)?,
+            })
+        }
+        "capture" => Ok(CliCommand::PlayCapture {
+            selectors: parse_device_selectors(tail)?,
+        }),
+        _ => Err(usage_error()),
+    }
+}
+
+fn parse_device_selector(args: &[String]) -> Result<(String, &[String]), RairstreamError> {
+    let Some((flag, tail)) = args.split_first() else {
+        return Err(usage_error());
+    };
+
+    if flag != "--device" {
+        return Err(unexpected_argument_error(flag));
+    }
+
+    let Some((selector, remaining)) = tail.split_first() else {
+        return Err(missing_value_error("--device"));
+    };
+
+    Ok((normalize_cli_text(selector, "selector")?, remaining))
+}
+
+fn parse_optional_pin(args: &[String]) -> Result<Option<String>, RairstreamError> {
+    match args {
+        [] => Ok(None),
+        [flag] if flag == "--pin" => Err(missing_value_error("--pin")),
+        [flag, pin] if flag == "--pin" => Ok(Some(normalize_cli_text(pin, "PIN")?)),
+        [unexpected, ..] => Err(unexpected_argument_error(unexpected)),
+    }
+}
+
+fn ensure_no_remaining_args(args: &[String]) -> Result<(), RairstreamError> {
+    match args {
+        [] => Ok(()),
+        [unexpected, ..] => Err(unexpected_argument_error(unexpected)),
+    }
+}
+
+fn normalize_cli_text(value: &str, label: &str) -> Result<String, RairstreamError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(RairstreamError::InvalidCli {
+            message: format!("{label} cannot be empty"),
+        });
+    }
+
+    Ok(value.to_string())
+}
+
+fn parse_device_selectors(args: &[String]) -> Result<Vec<String>, RairstreamError> {
+    let mut selectors = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] != "--device" {
+            return Err(RairstreamError::InvalidCli {
+                message: format!("unexpected argument `{}`", args[index]),
+            });
+        }
+
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| RairstreamError::InvalidCli {
+                message: String::from("--device requires a value"),
+            })?;
+        selectors.push(normalize_cli_text(value, "selector")?);
+        index += 2;
+    }
+
+    if selectors.is_empty() {
+        return Err(RairstreamError::InvalidCli {
+            message: String::from("at least one --device selector is required"),
+        });
+    }
+
+    Ok(selectors)
+}
+
+fn usage_error() -> RairstreamError {
+    RairstreamError::InvalidCli {
+        message: String::from(CLI_USAGE),
+    }
+}
+
+fn unexpected_argument_error(argument: &str) -> RairstreamError {
+    RairstreamError::InvalidCli {
+        message: format!("unexpected argument `{argument}`"),
+    }
+}
+
+fn missing_value_error(flag: &str) -> RairstreamError {
+    RairstreamError::InvalidCli {
+        message: format!("{flag} requires a value"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CliCommand, parse_cli};
+
+    #[test]
+    fn parse_play_capture_requires_device() {
+        assert!(parse_cli([String::from("play"), String::from("capture")]).is_err());
+    }
+
+    #[test]
+    fn parse_pair_with_pin() {
+        let cli = parse_cli([
+            String::from("pair"),
+            String::from("--device"),
+            String::from("Living Room"),
+            String::from("--pin"),
+            String::from("123456"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.command,
+            CliCommand::Pair {
+                selector: String::from("Living Room"),
+                pin: Some(String::from("123456")),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_inspect_accepts_device_flag() {
+        let cli = parse_cli([
+            String::from("inspect"),
+            String::from("--device"),
+            String::from("Living Room"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.command,
+            CliCommand::Inspect {
+                selector: String::from("Living Room"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_paired_forget_accepts_device_flag() {
+        let cli = parse_cli([
+            String::from("paired"),
+            String::from("forget"),
+            String::from("--device"),
+            String::from("Living Room"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.command,
+            CliCommand::PairedForget {
+                selector: String::from("Living Room"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_rejects_blank_device_selector() {
+        let error = parse_cli([
+            String::from("play"),
+            String::from("capture"),
+            String::from("--device"),
+            String::from("   "),
+        ])
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid command line: selector cannot be empty"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_legacy_positional_selector() {
+        let error = parse_cli([String::from("pair"), String::from("Living Room")]).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid command line: unexpected argument `Living Room`"
+        );
+    }
+}

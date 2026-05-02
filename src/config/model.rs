@@ -1,0 +1,65 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::pairing::ReceiverCredentials;
+use crate::receiver::ReceiverKind;
+
+pub const DEFAULT_SENDER_VOLUME_PERCENT: u16 = 100;
+pub const MAX_SENDER_VOLUME_PERCENT: u16 = 400;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedReceiver {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub receiver_kind: ReceiverKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppConfig {
+    #[serde(default = "default_sender_volume_percent")]
+    pub sender_volume_percent: u16,
+    #[serde(default)]
+    pub paired_receivers: HashMap<String, ReceiverCredentials>,
+    #[serde(default)]
+    pub receiver_cache: HashMap<String, CachedReceiver>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            sender_volume_percent: DEFAULT_SENDER_VOLUME_PERCENT,
+            paired_receivers: HashMap::new(),
+            receiver_cache: HashMap::new(),
+        }
+    }
+}
+
+impl AppConfig {
+    pub fn set_sender_volume_percent(&mut self, percent: u16) {
+        self.sender_volume_percent = percent.min(MAX_SENDER_VOLUME_PERCENT);
+    }
+
+    pub fn upsert_paired_receiver(
+        &mut self,
+        device_id: impl Into<String>,
+        receiver_credentials: ReceiverCredentials,
+    ) {
+        self.paired_receivers
+            .insert(device_id.into(), receiver_credentials);
+    }
+
+    pub fn remove_paired_receiver(&mut self, device_id: &str) {
+        self.paired_receivers.remove(device_id);
+    }
+
+    pub fn upsert_receiver_cache(&mut self, receiver: CachedReceiver) {
+        self.receiver_cache.insert(receiver.id.clone(), receiver);
+    }
+}
+
+const fn default_sender_volume_percent() -> u16 {
+    DEFAULT_SENDER_VOLUME_PERCENT
+}

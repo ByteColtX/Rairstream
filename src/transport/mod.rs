@@ -8,17 +8,16 @@ mod sink;
 
 use std::fmt::Write;
 
-use crate::app::SpeakerDevice;
 use crate::audio::AudioFormat;
 use crate::config::ReceiverCredentials;
+use crate::receiver::Receiver;
 use thiserror::Error;
 
 pub use codec::{AudioResampler, CodecDescription};
-pub use packet::{RaopPacketCounters, RaopSyncPacket, RtpAudioPacket};
 pub use rtsp::{RtspHeaders, RtspMethod, RtspRequest, RtspResponse, RtspStatus};
 pub use session::{
     ModernAirPlayConnection, ModernAirPlaySession, PreparedConnection, PreparedTransportSession,
-    RaopConnection, RaopSession, RaopSessionState, RaopStreamTransport,
+    RaopConnection, RaopSession,
 };
 pub use sink::{RaopAudioSink, RaopSinkConfig};
 
@@ -27,9 +26,11 @@ pub const RAOP_CHANNELS: u16 = 2;
 pub const RAOP_BITS_PER_SAMPLE: u16 = 16;
 pub const RAOP_FRAMES_PER_PACKET: usize = 352;
 pub const RAOP_STARTUP_LATENCY_FRAMES: u32 = 11_025;
+#[cfg_attr(not(test), allow(dead_code))]
 pub const RAOP_STARTUP_LATENCY_MILLIS: u32 =
     startup_latency_millis(RAOP_STARTUP_LATENCY_FRAMES, RAOP_SAMPLE_RATE_HZ);
 
+#[cfg_attr(not(test), allow(dead_code))]
 const fn startup_latency_millis(frames: u32, sample_rate_hz: u32) -> u32 {
     frames.saturating_mul(1_000) / sample_rate_hz
 }
@@ -37,7 +38,7 @@ const fn startup_latency_millis(frames: u32, sample_rate_hz: u32) -> u32 {
 /// 流建立前需要的最小会话信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionDescriptor {
-    pub device: SpeakerDevice,
+    pub device: Receiver,
     pub input_format: AudioFormat,
     pub frames_per_packet: usize,
     pub sender_volume_percent: u16,
@@ -46,7 +47,7 @@ pub struct SessionDescriptor {
 
 impl SessionDescriptor {
     #[must_use]
-    pub fn new(device: SpeakerDevice, input_format: AudioFormat) -> Self {
+    pub fn new(device: Receiver, input_format: AudioFormat) -> Self {
         Self {
             device,
             input_format,
@@ -177,11 +178,13 @@ mod tests {
         AirPlayError, CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
         RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS, RaopSession, SessionDescriptor,
     };
-    use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
+    use crate::receiver::{
+        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+    };
 
-    fn build_device() -> SpeakerDevice {
-        SpeakerDevice {
+    fn build_device() -> Receiver {
+        Receiver {
             id: String::from("speaker"),
             name: String::from("Speaker"),
             host: String::from("127.0.0.1"),
@@ -191,6 +194,7 @@ mod tests {
             receiver_public_key: None,
             receiver_kind: ReceiverKind::ClassicRaop,
             support: DeviceSupport::Supported,
+            capabilities: ReceiverCapabilities::default(),
         }
     }
 

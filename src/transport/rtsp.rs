@@ -511,8 +511,10 @@ mod tests {
         build_record_request, build_session_uri, build_setup_request, build_teardown_request,
         parse_setup_reply,
     };
-    use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
     use crate::audio::AudioFormat;
+    use crate::receiver::{
+        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+    };
     use crate::transport::{
         AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
         SessionDescriptor,
@@ -520,7 +522,7 @@ mod tests {
 
     fn build_descriptor() -> SessionDescriptor {
         SessionDescriptor::new(
-            SpeakerDevice {
+            Receiver {
                 id: String::from("speaker-id"),
                 name: String::from("Speaker"),
                 host: String::from("speaker.local"),
@@ -530,6 +532,7 @@ mod tests {
                 receiver_public_key: None,
                 receiver_kind: ReceiverKind::ClassicRaop,
                 support: DeviceSupport::Supported,
+                capabilities: ReceiverCapabilities::default(),
             },
             AudioFormat::default(),
         )

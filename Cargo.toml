@@ -27,17 +27,14 @@ serde_json = "1.0"
 sha1 = "0.11.0"
 sha2 = "0.10.9"
 srp = "0.7.0-rc.3"
-tao = "0.35.0"
-inputbox = "0.1.1"
+symphonia = { version = "0.5.5", features = ["all"] }
 thiserror = "2.0.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
-tray-icon = "0.22.0"
 x25519-dalek = "2.0.1"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.23.0"
-winreg = "0.52.0"
 
 [dev-dependencies]
 

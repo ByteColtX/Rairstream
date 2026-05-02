@@ -1,19 +1,20 @@
-//! 设备发现层：负责抽象 `AirPlay` / `RAOP` 设备浏览结果。
-
-mod mdns;
+pub mod browser;
+pub mod model;
 mod parser;
 
-use crate::app::{AirPlayGeneration, DeviceSupport, ReceiverKind, SpeakerDevice};
+use crate::receiver::Receiver;
 
-pub use mdns::MdnsDiscoveryService;
+pub use browser::MdnsDiscoveryService;
+pub use model::{MdnsServiceKind, ResolvedMdnsService};
 
 #[doc(hidden)]
 pub mod testing {
     use std::net::Ipv4Addr;
 
-    use crate::app::SpeakerDevice;
+    use crate::receiver::Receiver;
 
-    use super::parser::{MdnsServiceKind, ResolvedMdnsService, parse_resolved_services};
+    use super::parser::parse_resolved_services;
+    use super::{MdnsServiceKind, ResolvedMdnsService};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum MdnsTestServiceKind {
@@ -37,7 +38,7 @@ pub mod testing {
     }
 
     #[must_use]
-    pub fn parse_test_services(services: Vec<MdnsTestResolvedService>) -> Vec<SpeakerDevice> {
+    pub fn parse_test_services(services: Vec<MdnsTestResolvedService>) -> Vec<Receiver> {
         parse_resolved_services(
             services
                 .into_iter()
@@ -62,40 +63,26 @@ pub mod testing {
     }
 }
 
-/// 发现服务的最小接口。
 pub trait DiscoveryService {
-    fn discover_devices(&self) -> Vec<SpeakerDevice>;
+    fn discover_devices(&self) -> Vec<Receiver>;
 }
 
-/// 当前阶段的内存实现，可用于无网络环境下的稳定测试。
 #[derive(Debug, Default)]
 pub struct StubDiscoveryService;
 
 impl DiscoveryService for StubDiscoveryService {
-    fn discover_devices(&self) -> Vec<SpeakerDevice> {
-        vec![SpeakerDevice {
+    fn discover_devices(&self) -> Vec<Receiver> {
+        vec![Receiver {
             id: String::from("stub-speaker"),
             name: String::from("Stub Speaker"),
             host: String::from("127.0.0.1"),
             port: 7000,
-            generation: AirPlayGeneration::AirPlay1,
+            generation: crate::receiver::AirPlayGeneration::AirPlay1,
             pairing_id: None,
             receiver_public_key: None,
-            receiver_kind: ReceiverKind::ClassicRaop,
-            support: DeviceSupport::Supported,
+            receiver_kind: crate::receiver::ReceiverKind::ClassicRaop,
+            support: crate::receiver::DeviceSupport::Supported,
+            capabilities: crate::receiver::ReceiverCapabilities::default(),
         }]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DiscoveryService, StubDiscoveryService};
-
-    #[test]
-    fn stub_discovery_returns_placeholder_device() {
-        let devices = StubDiscoveryService.discover_devices();
-
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].port, 7000);
     }
 }
