@@ -7,6 +7,14 @@ authors = ["bytecolt"]
 repository = "https://github.com/ByteColtX/Rairstream"
 rust-version = "1.85"
 
+[package.metadata.release]
+allow-branch = ["main"]
+publish = false
+push-remote = "origin"
+tag-name = "v{{version}}"
+tag-message = "Release {{crate_name}} {{version}}"
+pre-release-commit-message = "chore: release {{crate_name}} {{version}}"
+
 [dependencies]
 aes = "0.8.4"
 aes-gcm = "0.10.3"

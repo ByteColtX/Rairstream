@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-release:
+    name: Windows Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith("v")) {
+            throw "release tag must start with v"
+          }
+
+          $versionLine = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"$'
+          if ($null -eq $versionLine) {
+            throw "failed to find package version in Cargo.toml"
+          }
+
+          $cargoVersion = $versionLine.Matches[0].Groups[1].Value
+          $tagVersion = $tag.Substring(1)
+
+          if ($cargoVersion -ne $tagVersion) {
+            throw "Cargo.toml version $cargoVersion does not match tag $tag"
+          }
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Build release binaries
+        shell: pwsh
+        run: |
+          cargo build --release --locked --target x86_64-pc-windows-msvc
+          cargo build --release --locked --target aarch64-pc-windows-msvc
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $outDir = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $targets = @(
+            @{ Triple = 'x86_64-pc-windows-msvc'; Suffix = 'windows-x86_64' },
+            @{ Triple = 'aarch64-pc-windows-msvc'; Suffix = 'windows-arm64' }
+          )
+
+          if (Test-Path $outDir) {
+            Remove-Item -Recurse -Force $outDir
+          }
+          New-Item -ItemType Directory -Path $outDir | Out-Null
+
+          foreach ($target in $targets) {
+            $package = "rairstream-$tag-$($target.Suffix)"
+            $staging = Join-Path $env:RUNNER_TEMP $package
+            $archive = Join-Path $outDir "$package.zip"
+            $checksum = Join-Path $outDir "$package.sha256"
+            $binaryDir = Join-Path $PWD "target\$($target.Triple)\release"
+
+            if (Test-Path $staging) {
+              Remove-Item -Recurse -Force $staging
+            }
+
+            New-Item -ItemType Directory -Path $staging | Out-Null
+            Copy-Item (Join-Path $binaryDir 'rairstream.exe') $staging
+
+            $pdb = Join-Path $binaryDir 'rairstream.pdb'
+            if (Test-Path $pdb) {
+              Copy-Item $pdb $staging
+            }
+
+            Copy-Item README.md $staging
+            Copy-Item README.en.md $staging
+            Copy-Item LICENSE $staging
+
+            if (Test-Path $archive) {
+              Remove-Item -Force $archive
+            }
+
+            Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive
+
+            $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $package.zip" | Out-File -FilePath $checksum -Encoding ascii
+          }
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $outDir = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $assets = Get-ChildItem $outDir -File | Sort-Object Name | ForEach-Object { $_.FullName }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets --clobber
+          } else {
+            gh release create $tag $assets --title $tag --generate-notes
+          }
