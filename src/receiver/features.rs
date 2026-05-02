@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct Features(pub u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod {
     #[default]

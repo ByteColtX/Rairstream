@@ -39,9 +39,9 @@ impl PreparedSession {
             Self::ClassicRaop(session) => Ok(SessionConnection::ClassicRaop(Box::new(
                 session.handshake()?,
             ))),
-            Self::ModernAirPlay(session) => {
-                Ok(SessionConnection::ModernAirPlay(Box::new(session.handshake()?)))
-            }
+            Self::ModernAirPlay(session) => Ok(SessionConnection::ModernAirPlay(Box::new(
+                session.handshake()?,
+            ))),
         }
     }
 

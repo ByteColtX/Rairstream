@@ -150,7 +150,8 @@ fn decode_frame_to_stereo(
     channels: usize,
     bytes_per_sample: usize,
 ) -> Result<[f64; 2], AirPlayError> {
-    let sample = |channel_index| decode_frame_sample(chunk, frame_offset, channel_index, bytes_per_sample);
+    let sample =
+        |channel_index| decode_frame_sample(chunk, frame_offset, channel_index, bytes_per_sample);
 
     match channels {
         0 => Err(AirPlayError::UnsupportedAudioFormat {
@@ -249,8 +250,7 @@ fn mix_seven_channel(
     let side_left = sample(5)?;
     let side_right = sample(6)?;
     Ok([
-        left
-            + center * CENTER_MIX_GAIN
+        left + center * CENTER_MIX_GAIN
             + lfe * LFE_MIX_GAIN
             + back_center * SURROUND_MIX_GAIN
             + side_left * SURROUND_MIX_GAIN,
@@ -274,8 +274,7 @@ fn mix_eight_channel(
     let side_left = sample(6)?;
     let side_right = sample(7)?;
     Ok([
-        left
-            + center * CENTER_MIX_GAIN
+        left + center * CENTER_MIX_GAIN
             + lfe * LFE_MIX_GAIN
             + back_left * SURROUND_MIX_GAIN
             + side_left * SURROUND_MIX_GAIN,
