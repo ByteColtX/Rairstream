@@ -1,7 +1,10 @@
+//! `symphonia` buffer 到内部 `AudioChunk` 的转换辅助。
+
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 
 use crate::audio::{AudioCaptureError, AudioChunk, AudioFormat, AudioSampleType};
 
+/// 将 `AudioBufferRef` 转成统一的交错 `f32` PCM 数据块。
 pub fn audio_buffer_ref_to_chunk(
     decoded: AudioBufferRef<'_>,
 ) -> Result<AudioChunk, AudioCaptureError> {

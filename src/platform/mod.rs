@@ -1,8 +1,8 @@
 #[cfg(target_os = "linux")]
-pub mod linux;
-pub mod unsupported;
+mod linux;
+mod unsupported;
 #[cfg(target_os = "windows")]
-pub mod windows;
+mod windows;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformInfo {

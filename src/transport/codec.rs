@@ -1,3 +1,5 @@
+//! 输入音频的 `decode`、`downmix`、`resample` 与 `packetize` 路径。
+
 use std::mem;
 
 use num_traits::ToPrimitive;
@@ -32,6 +34,7 @@ impl CodecDescription {
     }
 }
 
+/// 将输入 `AudioChunk` 重采样并切成 `RAOP` 所需的 PCM packet。
 #[derive(Debug, Clone)]
 pub struct AudioResampler {
     source_format: AudioFormat,
@@ -70,7 +73,7 @@ impl AudioResampler {
     pub fn push_chunk(&mut self, chunk: &AudioChunk) -> Result<Vec<Vec<u8>>, AirPlayError> {
         if chunk.format != self.source_format {
             return Err(AirPlayError::UnsupportedAudioFormat {
-                message: String::from("同一条采集流内的音频格式发生了变化"),
+                message: String::from("audio format changed within a single capture stream"),
             });
         }
 
@@ -124,11 +127,11 @@ fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError>
             })?;
     let _left_count =
         u32::try_from(channels.div_ceil(2)).map_err(|_| AirPlayError::UnsupportedAudioFormat {
-            message: String::from("声道数超出首版支持范围"),
+            message: String::from("channel count exceeds current support"),
         })?;
     let _right_count =
         u32::try_from(channels / 2).map_err(|_| AirPlayError::UnsupportedAudioFormat {
-            message: String::from("声道数超出首版支持范围"),
+            message: String::from("channel count exceeds current support"),
         })?;
     let mut frames = Vec::with_capacity(chunk.frames);
 
@@ -309,7 +312,7 @@ fn decode_sample(bytes: &[u8], format: AudioFormat) -> Result<f64, AirPlayError>
         }
         _ => Err(AirPlayError::UnsupportedAudioFormat {
             message: format!(
-                "暂不支持 {:?} / {}bit 输入格式",
+                "unsupported input format {:?} / {}bit",
                 format.sample_type, format.bits_per_sample
             ),
         }),

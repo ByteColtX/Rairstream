@@ -1,7 +1,5 @@
 mod connect;
-pub mod control;
 pub mod group;
-pub mod keepalive;
 pub mod planner;
 mod stream;
 

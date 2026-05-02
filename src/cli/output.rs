@@ -1,3 +1,5 @@
+//! CLI 输出格式化与终端打印。
+
 use std::path::Path;
 
 use crate::app::{InspectResult, PairedReceiverEntry};

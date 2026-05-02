@@ -139,7 +139,7 @@ where
         let receiver_id = self.resolve_cached_receiver_id(selector_text)?;
         if !self.config.paired_receivers.contains_key(&receiver_id) {
             return Err(RairstreamError::InvalidInput {
-                message: format!("receiver `{selector_text}` has no stored pairing"),
+                message: format!("receiver `{selector_text}` has no saved pairing"),
             });
         }
         let entry = self.build_paired_entry(&receiver_id);
@@ -500,7 +500,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "invalid input: receiver `Office` has no stored pairing"
+            "invalid input: receiver `Office` has no saved pairing"
         );
         let _ = std::fs::remove_file(path);
     }

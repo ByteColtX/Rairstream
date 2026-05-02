@@ -1,5 +1,5 @@
-pub mod browser;
-pub mod model;
+mod browser;
+mod model;
 mod parser;
 
 use crate::receiver::Receiver;
@@ -8,6 +8,7 @@ pub use browser::MdnsDiscoveryService;
 pub use model::{MdnsServiceKind, ResolvedMdnsService};
 
 #[doc(hidden)]
+#[allow(dead_code)]
 pub mod testing {
     use std::net::Ipv4Addr;
 
@@ -65,24 +66,4 @@ pub mod testing {
 
 pub trait DiscoveryService {
     fn discover_devices(&self) -> Vec<Receiver>;
-}
-
-#[derive(Debug, Default)]
-pub struct StubDiscoveryService;
-
-impl DiscoveryService for StubDiscoveryService {
-    fn discover_devices(&self) -> Vec<Receiver> {
-        vec![Receiver {
-            id: String::from("stub-speaker"),
-            name: String::from("Stub Speaker"),
-            host: String::from("127.0.0.1"),
-            port: 7000,
-            generation: crate::receiver::AirPlayGeneration::AirPlay1,
-            pairing_id: None,
-            receiver_public_key: None,
-            receiver_kind: crate::receiver::ReceiverKind::ClassicRaop,
-            support: crate::receiver::DeviceSupport::Supported,
-            capabilities: crate::receiver::ReceiverCapabilities::default(),
-        }]
-    }
 }

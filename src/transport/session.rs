@@ -1,3 +1,5 @@
+//! `RAOP` 与 modern `AirPlay` 的认证、握手和连接生命周期实现。
+
 use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
 
@@ -38,7 +40,7 @@ use super::rtsp::{
     parse_setup_reply,
 };
 use super::{AirPlayError, RAOP_STARTUP_LATENCY_FRAMES, RaopSinkConfig, SessionDescriptor};
-use crate::config::{ReceiverAuthFlow, ReceiverCredentials};
+use crate::pairing::{ReceiverAuthFlow, ReceiverCredentials};
 use crate::receiver::ReceiverKind;
 use crate::timing::clock::ntp_timestamp_now;
 use tracing::{debug, info, trace, warn};
@@ -106,10 +108,10 @@ impl RaopConnection {
     }
 
     pub fn teardown(mut self) -> Result<(), AirPlayError> {
-        info!(endpoint = %self.session.descriptor().device.endpoint(), "开始发送 TEARDOWN");
+        info!(endpoint = %self.session.descriptor().device.endpoint(), "sending TEARDOWN");
         self.stop_rtsp_keepalive(true)?;
         self.stop_timing_responder();
-        debug!(endpoint = %self.session.descriptor().device.endpoint(), "TEARDOWN 已完成");
+        debug!(endpoint = %self.session.descriptor().device.endpoint(), "TEARDOWN completed");
         Ok(())
     }
 
@@ -289,7 +291,7 @@ impl PairingTlv {
         while cursor < bytes.len() {
             if cursor + 2 > bytes.len() {
                 return Err(AirPlayError::Protocol {
-                    message: String::from("配对 TLV 数据缺少 type/length 字段"),
+                    message: String::from("pairing TLV is missing the type/length fields"),
                 });
             }
 
@@ -299,7 +301,7 @@ impl PairingTlv {
 
             if cursor + value_len > bytes.len() {
                 return Err(AirPlayError::Protocol {
-                    message: String::from("配对 TLV 数据长度超出响应体边界"),
+                    message: String::from("pairing TLV length exceeds response body bounds"),
                 });
             }
 
@@ -330,7 +332,7 @@ impl PairingTlv {
 
     fn require(&self, type_id: u8, field_name: &str) -> Result<&[u8], AirPlayError> {
         self.get(type_id).ok_or_else(|| AirPlayError::Protocol {
-            message: format!("配对 TLV 缺少 {field_name} 字段"),
+            message: format!("pairing TLV is missing field {field_name}"),
         })
     }
 
@@ -339,7 +341,7 @@ impl PairingTlv {
         if value.len() != 1 {
             return Err(AirPlayError::Protocol {
                 message: format!(
-                    "配对 TLV 中的 {field_name} 字段长度应为 1，实际为 {}",
+                    "pairing TLV field {field_name} must be 1 byte, got {}",
                     value.len()
                 ),
             });
@@ -424,14 +426,14 @@ impl ModernAirPlaySession {
         info!(
             endpoint = %endpoint,
             device_id = %self.descriptor.device.id,
-            "开始执行AirPlay Receiver 认证恢复"
+            "starting AirPlay Receiver authentication recovery"
         );
         let mut rtsp_client = RtspClient::connect(&endpoint)?;
         let info_response = rtsp_client.send(&self.info_request())?;
         debug!(
             endpoint = %endpoint,
             status_code = info_response.status.code,
-            "AirPlay Receiver /info 已返回响应"
+            "AirPlay Receiver /info responded"
         );
 
         if self.descriptor.receiver_credentials.is_none() {
@@ -478,13 +480,13 @@ impl ModernAirPlaySession {
         info!(
             endpoint = %endpoint,
             device_id = %self.descriptor.device.id,
-            "开始执行AirPlay Receiver 首次配对"
+            "starting first-time AirPlay Receiver pairing"
         );
         let mut rtsp_client = RtspClient::connect(&endpoint)?;
         let _info_response = rtsp_client.send(&self.info_request())?;
         debug!(
             endpoint = %endpoint,
-            "AirPlay Receiver 首配前 /info 已返回响应"
+            "AirPlay Receiver /info responded before first-time pairing"
         );
         complete_legacy_pairing(&mut rtsp_client, &mut self, pin)
     }
@@ -494,19 +496,19 @@ impl ModernAirPlaySession {
         info!(
             endpoint = %endpoint,
             device_id = %self.descriptor.device.id,
-            "开始请求 AirPlay Receiver 显示配对 PIN"
+            "requesting AirPlay Receiver pairing PIN display"
         );
         let mut rtsp_client = RtspClient::connect(&endpoint)?;
         let _info_response = rtsp_client.send(&self.info_request())?;
         debug!(
             endpoint = %endpoint,
-            "AirPlay Receiver 弹码前 /info 已返回响应"
+            "AirPlay Receiver /info responded before PIN display"
         );
         let pair_pin_start_response = rtsp_client.send(&self.pair_pin_start_request())?;
         debug!(
             endpoint = %endpoint,
             status_code = pair_pin_start_response.status.code,
-            "AirPlay Receiver 弹码请求 /pair-pin-start"
+            "AirPlay Receiver /pair-pin-start request"
         );
         map_pair_pin_start_response(&pair_pin_start_response)
     }
@@ -616,7 +618,7 @@ impl RaopSession {
             initial_sequence,
             initial_timestamp,
             audio_ssrc,
-            "创建 RAOP 会话"
+            "creating RAOP session"
         );
 
         Ok(Self {
@@ -675,8 +677,8 @@ impl RaopSession {
         F: FnMut(&str),
     {
         let endpoint = self.descriptor.device.endpoint();
-        info!(endpoint = %endpoint, device_id = %self.descriptor.device.id, "开始执行 RAOP 握手");
-        progress(&format!("连接 RTSP 控制通道: {endpoint}"));
+        info!(endpoint = %endpoint, device_id = %self.descriptor.device.id, "starting RAOP handshake");
+        progress(&format!("connecting RTSP control channel: {endpoint}"));
         let rtsp_client = RtspClient::connect(&endpoint)?;
         self.handshake_with_rtsp_client_and_progress(rtsp_client, progress)
     }
@@ -721,24 +723,24 @@ impl RaopSession {
             audio_port,
             control_port,
             timing_port,
-            "本地 UDP 端口绑定完成"
+            "local UDP ports bound"
         );
         progress(&format!(
-            "本地 UDP 端口已绑定: audio={audio_port}, control={control_port}, timing={timing_port}"
+            "local UDP ports bound: audio={audio_port}, control={control_port}, timing={timing_port}"
         ));
 
-        progress("发送 OPTIONS");
+        progress("sending OPTIONS");
         let options_response = rtsp_client.send(&self.options_request())?;
         progress(&format_response_status("OPTIONS", &options_response));
         ensure_success(&options_response, "OPTIONS")?;
 
-        progress("发送 ANNOUNCE");
+        progress("sending ANNOUNCE");
         let announce_response = rtsp_client.send(&self.announce_request())?;
         progress(&format_response_status("ANNOUNCE", &announce_response));
         ensure_success(&announce_response, "ANNOUNCE")?;
 
         let timing_responder = TimingResponder::start(timing_socket)?;
-        progress("发送 SETUP");
+        progress("sending SETUP");
         let setup_response = rtsp_client.send(&self.setup_request(setup_transport))?;
         progress(&format_response_status("SETUP", &setup_response));
         self.apply_setup_response(&setup_response)?;
@@ -750,14 +752,14 @@ impl RaopSession {
             control_port = setup_reply.control_port,
             timing_port = setup_reply.timing_port,
             session_id = %setup_reply.session_id,
-            "已解析设备返回的 UDP 端口"
+            "parsed UDP ports returned by receiver"
         );
         progress(&format!(
-            "设备 UDP 端口: audio={}, control={}, timing={}",
+            "receiver UDP ports: audio={}, control={}, timing={}",
             setup_reply.server_port, setup_reply.control_port, setup_reply.timing_port
         ));
 
-        progress("发送 RECORD");
+        progress("sending RECORD");
         let record_response = rtsp_client.send(&self.record_request()?)?;
         progress(&format_response_status("RECORD", &record_response));
         self.apply_record_response(&record_response)?;
@@ -776,9 +778,9 @@ impl RaopSession {
             resolve_socket_addr(&self.descriptor.device.host, setup_reply.server_port)?;
         let control_target =
             resolve_socket_addr(&self.descriptor.device.host, setup_reply.control_port)?;
-        debug!(audio_target = %audio_target, control_target = %control_target, "已解析远端音频与控制地址");
-        info!(endpoint = %endpoint, keepalive_secs = keepalive_interval.as_secs(), "RAOP 会话已进入 Streaming");
-        progress("RAOP 会话已进入 Streaming");
+        debug!(audio_target = %audio_target, control_target = %control_target, "resolved remote audio/control endpoints");
+        info!(endpoint = %endpoint, keepalive_secs = keepalive_interval.as_secs(), "RAOP session entered Streaming");
+        progress("RAOP session entered Streaming");
 
         Ok(RaopConnection {
             session: self,
@@ -817,11 +819,11 @@ impl RaopSession {
             server_port = setup_reply.server_port,
             control_port = setup_reply.control_port,
             timing_port = setup_reply.timing_port,
-            "SETUP 响应解析成功"
+            "SETUP response parsed"
         );
         self.setup_reply = Some(setup_reply);
         self.state = RaopSessionState::Prepared;
-        info!(state = ?self.state, "RAOP 会话状态已切换到 Prepared");
+        info!(state = ?self.state, "RAOP session state changed to Prepared");
         Ok(())
     }
 
@@ -842,7 +844,7 @@ impl RaopSession {
     pub fn apply_record_response(&mut self, response: &RtspResponse) -> Result<(), AirPlayError> {
         ensure_success(response, "RECORD")?;
         self.state = RaopSessionState::Streaming;
-        info!(state = ?self.state, "RAOP 会话状态已切换到 Streaming");
+        info!(state = ?self.state, "RAOP session state changed to Streaming");
         Ok(())
     }
 
@@ -925,7 +927,7 @@ impl RtspKeepalive {
                 .run();
             })
             .map_err(map_connection_error)?;
-        debug!(endpoint = %endpoint, interval_secs = interval.as_secs(), "RTSP keepalive 已启动");
+        debug!(endpoint = %endpoint, interval_secs = interval.as_secs(), "RTSP keepalive started");
 
         Ok(Self {
             command_tx,
@@ -947,7 +949,9 @@ impl RtspKeepalive {
             let result = match reply_rx.recv_timeout(RTSP_IO_TIMEOUT + Duration::from_secs(1)) {
                 Ok(result) => result,
                 Err(RecvTimeoutError::Timeout) => Err(AirPlayError::ConnectionFailed {
-                    message: String::from("等待 RTSP 保活线程发送 TEARDOWN 超时"),
+                    message: String::from(
+                        "timed out waiting for RTSP keepalive worker to send TEARDOWN",
+                    ),
                 }),
                 Err(RecvTimeoutError::Disconnected) => Ok(()),
             };
@@ -963,7 +967,7 @@ impl RtspKeepalive {
     fn join_worker(&mut self) {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
-            debug!("RTSP keepalive 已停止");
+            debug!("RTSP keepalive stopped");
         }
     }
 }
@@ -975,7 +979,7 @@ impl RtspKeepaliveWorker {
         loop {
             match self.command_rx.recv_timeout(self.interval) {
                 Ok(RtspKeepaliveCommand::Stop) => {
-                    debug!(endpoint = %endpoint, "收到 RTSP 保活停止指令");
+                    debug!(endpoint = %endpoint, "received RTSP keepalive stop command");
                     break;
                 }
                 Ok(RtspKeepaliveCommand::Teardown(reply_tx)) => {
@@ -986,7 +990,7 @@ impl RtspKeepaliveWorker {
                         &mut self.cseq,
                     );
                     if let Err(error) = &result {
-                        warn!(endpoint = %endpoint, error = %error, "发送 TEARDOWN 失败");
+                        warn!(endpoint = %endpoint, error = %error, "failed to send TEARDOWN");
                     }
                     let _ = reply_tx.send(result);
                     break;
@@ -1002,7 +1006,7 @@ impl RtspKeepaliveWorker {
                                     endpoint = %endpoint,
                                     status_code = response.status.code,
                                     error = %error,
-                                    "RTSP keepalive 收到失败响应"
+                                    "RTSP keepalive received failure response"
                                 );
                                 self.transport_terminated.store(true, Ordering::SeqCst);
                                 break;
@@ -1011,7 +1015,7 @@ impl RtspKeepaliveWorker {
                                 endpoint = %endpoint,
                                 cseq = self.cseq,
                                 status_code = response.status.code,
-                                "RTSP keepalive 成功"
+                                "RTSP keepalive succeeded"
                             );
                         }
                         Err(error) => {
@@ -1019,7 +1023,7 @@ impl RtspKeepaliveWorker {
                                 endpoint = %endpoint,
                                 cseq = self.cseq,
                                 error = %error,
-                                "RTSP keepalive 失败"
+                                "RTSP keepalive failed"
                             );
                             self.transport_terminated.store(true, Ordering::SeqCst);
                             break;
@@ -1055,7 +1059,7 @@ fn send_rtsp_teardown(
 
 impl RtspClient {
     fn connect(endpoint: &str) -> Result<Self, AirPlayError> {
-        debug!(endpoint = %endpoint, timeout_secs = RTSP_IO_TIMEOUT.as_secs(), "开始连接 TCP RTSP 控制通道");
+        debug!(endpoint = %endpoint, timeout_secs = RTSP_IO_TIMEOUT.as_secs(), "connecting TCP RTSP control channel");
         let writer = TcpStream::connect(endpoint).map_err(map_connection_error)?;
         writer
             .set_read_timeout(Some(RTSP_IO_TIMEOUT))
@@ -1064,7 +1068,7 @@ impl RtspClient {
             .set_write_timeout(Some(RTSP_IO_TIMEOUT))
             .map_err(map_connection_error)?;
         let reader = BufReader::new(writer.try_clone().map_err(map_connection_error)?);
-        debug!(endpoint = %endpoint, "TCP RTSP 控制通道连接成功");
+        debug!(endpoint = %endpoint, "TCP RTSP control channel connected");
 
         Ok(Self { writer, reader })
     }
@@ -1075,9 +1079,9 @@ impl RtspClient {
             method = request.method.as_str(),
             uri = %request.uri,
             cseq = request.headers.get("CSeq").unwrap_or("?"),
-            "发送 RTSP 请求"
+            "sending RTSP request"
         );
-        trace!(request_bytes = ?encoded_request, "RTSP 请求原始字节");
+        trace!(request_bytes = ?encoded_request, "raw RTSP request bytes");
         self.writer
             .write_all(&encoded_request)
             .map_err(map_connection_error)?;
@@ -1097,7 +1101,7 @@ impl RtspClient {
                 .map_err(map_connection_error)?;
             if bytes_read == 0 {
                 return Err(AirPlayError::ConnectionFailed {
-                    message: String::from("RTSP 连接在响应完成前被关闭"),
+                    message: String::from("RTSP connection closed before the response completed"),
                 });
             }
 
@@ -1117,7 +1121,7 @@ impl RtspClient {
                         .trim()
                         .parse::<usize>()
                         .map_err(|_| AirPlayError::Protocol {
-                            message: format!("RTSP Content-Length 无效: {}", value.trim()),
+                            message: format!("invalid RTSP Content-Length: {}", value.trim()),
                         })?;
             }
         }
@@ -1134,9 +1138,9 @@ impl RtspClient {
             status_code = response.status.code,
             reason_phrase = %response.status.reason_phrase,
             content_length,
-            "收到 RTSP 响应"
+            "received RTSP response"
         );
-        trace!(response_head = %head, response_body = ?response.body, "RTSP 响应原始数据");
+        trace!(response_head = %head, response_body = ?response.body, "raw RTSP response bytes");
         Ok(response)
     }
 }
@@ -1159,7 +1163,7 @@ impl TimingResponder {
             .name(String::from("raop-timing-responder"))
             .spawn(move || run_timing_responder(socket, worker_stop_requested))
             .map_err(map_connection_error)?;
-        debug!(local_addr = %local_addr, "Timing responder 已启动");
+        debug!(local_addr = %local_addr, "Timing responder started");
 
         Ok(Self {
             stop_requested,
@@ -1171,7 +1175,7 @@ impl TimingResponder {
         self.stop_requested.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
-            debug!("Timing responder 已停止");
+            debug!("Timing responder stopped");
         }
     }
 }
@@ -1188,12 +1192,12 @@ fn run_timing_responder(socket: UdpSocket, stop_requested: Arc<AtomicBool>) {
     while !stop_requested.load(Ordering::Acquire) {
         match socket.recv_from(&mut buffer) {
             Ok((len, peer_addr)) => {
-                trace!(peer_addr = %peer_addr, bytes = len, "收到 timing 请求");
+                trace!(peer_addr = %peer_addr, bytes = len, "received timing request");
                 if let Some(reply) = build_timing_reply(&buffer[..len]) {
                     if let Err(error) = socket.send_to(&reply, peer_addr) {
-                        warn!(peer_addr = %peer_addr, error = %error, "发送 timing 响应失败");
+                        warn!(peer_addr = %peer_addr, error = %error, "failed to send timing response");
                     } else {
-                        trace!(peer_addr = %peer_addr, bytes = reply.len(), "已发送 timing 响应");
+                        trace!(peer_addr = %peer_addr, bytes = reply.len(), "timing response sent");
                     }
                 }
             }
@@ -1203,7 +1207,7 @@ fn run_timing_responder(socket: UdpSocket, stop_requested: Arc<AtomicBool>) {
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) => {}
             Err(error) => {
-                warn!(error = %error, "Timing responder 因 I/O 错误退出");
+                warn!(error = %error, "Timing responder exited due to I/O error");
                 break;
             }
         }
@@ -1278,7 +1282,7 @@ fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, AirPlayError
         .map_err(map_connection_error)?
         .next()
         .ok_or_else(|| AirPlayError::ConnectionFailed {
-            message: format!("无法解析设备地址 {endpoint}"),
+            message: format!("failed to resolve receiver address {endpoint}"),
         })
 }
 
@@ -1299,7 +1303,7 @@ fn ensure_success(response: &RtspResponse, method: &str) -> Result<(), AirPlayEr
     }
 
     Err(AirPlayError::Protocol {
-        message: format!("{method} 返回了失败状态码 {}", response.status.code),
+        message: format!("{method} returned failure status {}", response.status.code),
     })
 }
 
@@ -1310,10 +1314,12 @@ fn map_modern_auth_probe_response(
         200 => Ok(ModernAuthProbeOutcome::ContinueWithCredentials),
         401 => Ok(ModernAuthProbeOutcome::RequiresPairing),
         403 => Err(AirPlayError::AuthenticationFailed {
-            message: String::from("设备拒绝当前认证上下文或匿名控制探测"),
+            message: String::from(
+                "receiver rejected the current authentication context or anonymous control probe",
+            ),
         }),
         code => Err(AirPlayError::Protocol {
-            message: format!("AirPlay Receiver /info 返回了未预期状态码 {code}"),
+            message: format!("AirPlay Receiver /info returned unexpected status {code}"),
         }),
     }
 }
@@ -1327,7 +1333,7 @@ fn detect_initial_pairing_requirement(
     debug!(
         endpoint = %endpoint,
         status_code = pair_pin_start_response.status.code,
-        "AirPlay Receiver 无本地凭据，主动探测 /pair-pin-start"
+        "probing /pair-pin-start because no local AirPlay Receiver credentials are available"
     );
     map_pair_pin_start_response(&pair_pin_start_response)?;
     Err(AirPlayError::PairingRequired)
@@ -1342,7 +1348,7 @@ fn complete_legacy_pairing(
     let trimmed_pin = pin.trim();
     if trimmed_pin.is_empty() {
         return Err(AirPlayError::AuthenticationFailed {
-            message: String::from("配对 PIN 不能为空"),
+            message: String::from("pairing PIN must not be empty"),
         });
     }
 
@@ -1369,7 +1375,9 @@ fn complete_legacy_pairing(
             &start_reply.public_key,
         )
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("pair-setup-pin SRP 参数无效，或输入的 PIN 不正确"),
+            message: String::from(
+                "pair-setup-pin SRP parameters are invalid, or the provided PIN is incorrect",
+            ),
         })?;
     let session_key = derive_legacy_pair_setup_session_key(verifier.key());
     let padded_receiver_public = left_pad_legacy_srp_public(&start_reply.public_key)?;
@@ -1484,7 +1492,9 @@ fn complete_optional_auth_setup(
         return Ok(());
     }
     if response.status.code == 404 {
-        debug!("接收端未暴露 /auth-setup，继续尝试后续 RAOP 建链");
+        debug!(
+            "receiver did not expose /auth-setup; continuing with the remaining RAOP setup flow"
+        );
         return Ok(());
     }
     Err(map_pairing_http_failure(&response, "/auth-setup"))
@@ -1606,7 +1616,7 @@ fn encode_binary_plist(value: &Value) -> Result<Vec<u8>, AirPlayError> {
     value
         .to_writer_binary(&mut encoded)
         .map_err(|error| AirPlayError::Protocol {
-            message: format!("编码 binary plist 失败: {error}"),
+            message: format!("failed to encode binary plist: {error}"),
         })?;
     Ok(encoded)
 }
@@ -1614,13 +1624,13 @@ fn encode_binary_plist(value: &Value) -> Result<Vec<u8>, AirPlayError> {
 fn decode_binary_plist(response: &RtspResponse, path: &str) -> Result<Dictionary, AirPlayError> {
     let value = Value::from_reader(Cursor::new(&response.body)).map_err(|error| {
         AirPlayError::Protocol {
-            message: format!("{path} 返回了无效 binary plist: {error}"),
+            message: format!("{path} returned an invalid binary plist: {error}"),
         }
     })?;
     value
         .into_dictionary()
         .ok_or_else(|| AirPlayError::Protocol {
-            message: format!("{path} 返回的 binary plist 不是 dictionary"),
+            message: format!("{path} returned a binary plist that is not a dictionary"),
         })
 }
 
@@ -1633,7 +1643,7 @@ fn derive_hkdf_sha512(
     let mut output = [0_u8; 32];
     hkdf.expand(info, &mut output)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("派生会话认证密钥失败"),
+            message: String::from("failed to derive the session authentication key"),
         })?;
     Ok(output)
 }
@@ -1733,24 +1743,26 @@ fn receiver_pairing_id_from_device(
         .pairing_id
         .clone()
         .ok_or_else(|| AirPlayError::InvalidSession {
-            message: String::from("设备缺少 AirPlay Receiver pairing id（mDNS pi/gid）"),
+            message: String::from(
+                "receiver is missing an AirPlay Receiver pairing id (mDNS pi/gid)",
+            ),
         })
 }
 
 fn decode_mdns_public_key(value: &str) -> Result<[u8; 32], AirPlayError> {
     if let Ok(bytes) = hex::decode(value) {
         return bytes.try_into().map_err(|_| AirPlayError::InvalidSession {
-            message: String::from("mDNS pk 需要 32 字节十六进制数据"),
+            message: String::from("mDNS pk requires 32 bytes of hex data"),
         });
     }
 
     let bytes = Base64::decode_vec(value)
         .or_else(|_| Base64Unpadded::decode_vec(value))
         .map_err(|_| AirPlayError::InvalidSession {
-            message: String::from("mDNS pk 不是有效的十六进制或 Base64 公钥"),
+            message: String::from("mDNS pk is not a valid hex or Base64 public key"),
         })?;
     bytes.try_into().map_err(|_| AirPlayError::InvalidSession {
-        message: String::from("mDNS pk 需要 32 字节公钥数据"),
+        message: String::from("mDNS pk requires 32 bytes of public key data"),
     })
 }
 
@@ -1764,13 +1776,13 @@ fn plist_data_field(
         Some(Value::String(value)) => Base64::decode_vec(value)
             .or_else(|_| Base64Unpadded::decode_vec(value))
             .map_err(|_| AirPlayError::Protocol {
-                message: format!("{path} 字段 {field_name} 不是有效 Base64 数据"),
+                message: format!("{path} field {field_name} is not valid Base64 data"),
             }),
         Some(_) => Err(AirPlayError::Protocol {
-            message: format!("{path} 字段 {field_name} 类型无效"),
+            message: format!("{path} field {field_name} has an invalid type"),
         }),
         None => Err(AirPlayError::Protocol {
-            message: format!("{path} 缺少字段 {field_name}"),
+            message: format!("{path} is missing field {field_name}"),
         }),
     }
 }
@@ -1875,7 +1887,9 @@ fn verify_legacy_pair_setup_server_proof(
     }
 
     Err(AirPlayError::AuthenticationFailed {
-        message: String::from("pair-setup-pin 服务器校验失败，请检查 PIN 是否正确"),
+        message: String::from(
+            "pair-setup-pin server proof verification failed; check whether the PIN is correct",
+        ),
     })
 }
 
@@ -1883,7 +1897,9 @@ fn left_pad_legacy_srp_public(public_key: &[u8]) -> Result<Vec<u8>, AirPlayError
     let modulus_len = G2048::generator().params().modulus().to_be_bytes().len();
     if public_key.len() > modulus_len {
         return Err(AirPlayError::AuthenticationFailed {
-            message: String::from("pair-setup-pin SRP 公钥长度超出 2048-bit 组范围"),
+            message: String::from(
+                "pair-setup-pin SRP public key length exceeds the 2048-bit group range",
+            ),
         });
     }
 
@@ -1900,14 +1916,14 @@ fn encrypt_legacy_pair_setup_public_key(
     let (key, iv) = derive_legacy_pair_setup_key_iv(session_key);
     let cipher = aes_gcm::AesGcm::<Aes128, aes::cipher::consts::U16>::new_from_slice(&key)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("初始化 legacy pair-setup AES-GCM 失败"),
+            message: String::from("failed to initialize legacy pair-setup AES-GCM"),
         })?;
     let nonce = aes_gcm::Nonce::<aes::cipher::consts::U16>::clone_from_slice(&iv);
     let mut ciphertext = controller_public_key.to_vec();
     let tag = cipher
         .encrypt_in_place_detached(&nonce, b"", &mut ciphertext)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("加密 legacy pair-setup 公钥失败"),
+            message: String::from("failed to encrypt the legacy pair-setup public key"),
         })?;
     Ok(LegacyEncryptedPublicKey {
         ciphertext,
@@ -1924,7 +1940,7 @@ fn decrypt_legacy_pair_setup_public_key(
     increment_big_endian_counter(&mut iv);
     let cipher = aes_gcm::AesGcm::<Aes128, aes::cipher::consts::U16>::new_from_slice(&key)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("初始化 legacy pair-setup AES-GCM 失败"),
+            message: String::from("failed to initialize legacy pair-setup AES-GCM"),
         })?;
     let nonce = aes_gcm::Nonce::<aes::cipher::consts::U16>::clone_from_slice(&iv);
     let mut plaintext = encrypted_public_key.to_vec();
@@ -1932,9 +1948,9 @@ fn decrypt_legacy_pair_setup_public_key(
     cipher
         .decrypt_in_place_detached(&nonce, b"", &mut plaintext, tag)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("解密 legacy pair-setup 接收端公钥失败"),
+            message: String::from("failed to decrypt the legacy pair-setup receiver public key"),
         })?;
-    decode_fixed_32(&plaintext, "legacy pair-setup 接收端公钥")
+    decode_fixed_32(&plaintext, "legacy pair-setup receiver public key")
 }
 
 fn apply_legacy_pair_verify_finish_signature_keystream(
@@ -1971,7 +1987,7 @@ fn map_legacy_pair_verify_start_response(
     if response.body.len() != 96 {
         return Err(AirPlayError::Protocol {
             message: format!(
-                "legacy /pair-verify 起始响应长度无效: {}",
+                "invalid legacy /pair-verify start response length: {}",
                 response.body.len()
             ),
         });
@@ -1980,7 +1996,7 @@ fn map_legacy_pair_verify_start_response(
     let challenge = response.body[32..]
         .try_into()
         .map_err(|_| AirPlayError::Protocol {
-            message: String::from("legacy /pair-verify challenge 长度必须为 64 字节"),
+            message: String::from("legacy /pair-verify challenge must be 64 bytes"),
         })?;
     Ok(LegacyPairVerifyStartReply {
         public_key,
@@ -2003,7 +2019,7 @@ fn verify_legacy_pair_verify_signature(
     ));
     let receiver_verifying_key = VerifyingKey::from_bytes(receiver_public_key).map_err(|_| {
         AirPlayError::InvalidSession {
-            message: String::from("mDNS pk 不是有效的 Ed25519 公钥"),
+            message: String::from("mDNS pk is not a valid Ed25519 public key"),
         }
     })?;
     let mut signed_message = Vec::with_capacity(64);
@@ -2012,7 +2028,7 @@ fn verify_legacy_pair_verify_signature(
     receiver_verifying_key
         .verify(&signed_message, &signature)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("legacy /pair-verify 接收端签名校验失败"),
+            message: String::from("legacy /pair-verify receiver signature verification failed"),
         })
 }
 
@@ -2032,7 +2048,7 @@ fn encrypt_pair_verify_payload(
             },
         )
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("构造 pair-verify 加密载荷失败"),
+            message: String::from("failed to build pair-verify encrypted payload"),
         })
 }
 
@@ -2052,14 +2068,16 @@ fn decrypt_pair_verify_payload(
             },
         )
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("解密 pair-verify 响应失败，请检查既有配对记录是否仍有效"),
+            message: String::from(
+                "failed to decrypt the pair-verify response; check whether the saved pairing is still valid",
+            ),
         })
 }
 
 fn build_prefixed_nonce(nonce_suffix: &[u8]) -> Result<Nonce, AirPlayError> {
     if nonce_suffix.len() > 8 {
         return Err(AirPlayError::Protocol {
-            message: String::from("配对 nonce 后缀长度无效"),
+            message: String::from("invalid pairing nonce suffix length"),
         });
     }
     let mut nonce = [0_u8; 12];
@@ -2084,7 +2102,9 @@ fn decode_receiver_credentials(
         controller_ltsk
             .try_into()
             .map_err(|_| AirPlayError::InvalidSession {
-                message: String::from("controller_ltsk_hex 需要 32 字节 Ed25519 私钥种子"),
+                message: String::from(
+                    "controller_ltsk_hex requires a 32-byte Ed25519 private key seed",
+                ),
             })?;
     let controller_signing_key = SigningKey::from_bytes(&controller_secret_key);
     let controller_public_bytes = decode_hex_fixed::<32>(
@@ -2093,7 +2113,7 @@ fn decode_receiver_credentials(
     )?;
     if controller_signing_key.verifying_key().to_bytes() != controller_public_bytes {
         return Err(AirPlayError::InvalidSession {
-            message: String::from("controller_ltpk_hex 与 controller_ltsk_hex 不匹配"),
+            message: String::from("controller_ltpk_hex does not match controller_ltsk_hex"),
         });
     }
 
@@ -2102,7 +2122,7 @@ fn decode_receiver_credentials(
     let receiver_verifying_key =
         VerifyingKey::from_bytes(&receiver_public_bytes).map_err(|_| {
             AirPlayError::InvalidSession {
-                message: String::from("receiver_ltpk_hex 不是有效的 Ed25519 公钥"),
+                message: String::from("receiver_ltpk_hex is not a valid Ed25519 public key"),
             }
         })?;
 
@@ -2110,7 +2130,9 @@ fn decode_receiver_credentials(
         && device_pairing_id != receiver_credentials.receiver_pairing_id
     {
         return Err(AirPlayError::InvalidSession {
-            message: String::from("本地接收端 pairing id 与当前 mDNS pi/gid 不一致"),
+            message: String::from(
+                "saved receiver pairing id does not match the current mDNS pi/gid",
+            ),
         });
     }
 
@@ -2118,7 +2140,9 @@ fn decode_receiver_credentials(
         let decoded_device_public_key = decode_mdns_public_key(device_public_key)?;
         if decoded_device_public_key != receiver_public_bytes {
             return Err(AirPlayError::InvalidSession {
-                message: String::from("本地接收端公钥与当前 mDNS pk 不一致"),
+                message: String::from(
+                    "saved receiver public key does not match the current mDNS pk",
+                ),
             });
         }
     }
@@ -2138,13 +2162,13 @@ fn decode_hex_fixed<const N: usize>(
 ) -> Result<[u8; N], AirPlayError> {
     let bytes = decode_hex_bytes(value, field_name)?;
     bytes.try_into().map_err(|_| AirPlayError::InvalidSession {
-        message: format!("{field_name} 需要 {N} 字节十六进制数据"),
+        message: format!("{field_name} requires {N} bytes of hex data"),
     })
 }
 
 fn decode_hex_bytes(value: &str, field_name: &str) -> Result<Vec<u8>, AirPlayError> {
     hex::decode(value).map_err(|_| AirPlayError::InvalidSession {
-        message: format!("{field_name} 不是有效的十六进制字符串"),
+        message: format!("{field_name} is not a valid hex string"),
     })
 }
 
@@ -2162,11 +2186,13 @@ fn verify_receiver_identity(
     let tlv = PairingTlv::parse(&decrypted)?;
     let identifier = std::str::from_utf8(tlv.require(PAIRING_TLV_IDENTIFIER, "identifier")?)
         .map_err(|_| AirPlayError::Protocol {
-            message: String::from("pair-verify 响应中的 identifier 不是有效 UTF-8"),
+            message: String::from("identifier in pair-verify response is not valid UTF-8"),
         })?;
     if identifier != receiver_credentials.receiver_pairing_id {
         return Err(AirPlayError::AuthenticationFailed {
-            message: String::from("pair-verify 返回的接收端标识与本地配对记录不一致"),
+            message: String::from(
+                "receiver identifier returned by pair-verify does not match the saved pairing record",
+            ),
         });
     }
 
@@ -2181,13 +2207,15 @@ fn verify_receiver_identity(
         .receiver_verifying_key
         .verify(&signed_message, &signature)
         .map_err(|_| AirPlayError::AuthenticationFailed {
-            message: String::from("pair-verify 接收端签名校验失败，请检查配对记录是否已失效"),
+            message: String::from(
+                "pair-verify receiver signature verification failed; check whether the saved pairing record has expired",
+            ),
         })
 }
 
 fn decode_signature_bytes(bytes: &[u8]) -> Result<[u8; 64], AirPlayError> {
     bytes.try_into().map_err(|_| AirPlayError::Protocol {
-        message: String::from("pair-verify 签名长度必须为 64 字节"),
+        message: String::from("pair-verify signature must be 64 bytes"),
     })
 }
 
@@ -2201,13 +2229,13 @@ fn map_pair_verify_start_response(
     let tlv = PairingTlv::parse(&response.body)?;
     if let Some(error_code) = tlv.get(PAIRING_TLV_ERROR) {
         return Err(AirPlayError::AuthenticationFailed {
-            message: format!("/pair-verify 返回 TLV error={error_code:02x?}"),
+            message: format!("/pair-verify returned TLV error={error_code:02x?}"),
         });
     }
     let state = tlv.require_byte(PAIRING_TLV_STATE, "state")?;
     if state != PAIR_VERIFY_START_RESPONSE_STATE {
         return Err(AirPlayError::Protocol {
-            message: format!("/pair-verify 起始响应返回了未预期 state={state}"),
+            message: format!("/pair-verify start response returned unexpected state={state}"),
         });
     }
 
@@ -2230,13 +2258,13 @@ fn map_pair_verify_finish_response(response: &RtspResponse) -> Result<(), AirPla
     let tlv = PairingTlv::parse(&response.body)?;
     if let Some(error_code) = tlv.get(PAIRING_TLV_ERROR) {
         return Err(AirPlayError::AuthenticationFailed {
-            message: format!("/pair-verify 完成步骤返回 TLV error={error_code:02x?}"),
+            message: format!("/pair-verify finish step returned TLV error={error_code:02x?}"),
         });
     }
     let state = tlv.require_byte(PAIRING_TLV_STATE, "state")?;
     if state != PAIR_VERIFY_FINISH_RESPONSE_STATE {
         return Err(AirPlayError::Protocol {
-            message: format!("/pair-verify 完成响应返回了未预期 state={state}"),
+            message: format!("/pair-verify finish response returned unexpected state={state}"),
         });
     }
 
@@ -2245,7 +2273,7 @@ fn map_pair_verify_finish_response(response: &RtspResponse) -> Result<(), AirPla
 
 fn decode_fixed_32(bytes: &[u8], field_name: &str) -> Result<[u8; 32], AirPlayError> {
     bytes.try_into().map_err(|_| AirPlayError::Protocol {
-        message: format!("{field_name} 长度必须为 32 字节"),
+        message: format!("{field_name} must be 32 bytes"),
     })
 }
 
@@ -2253,10 +2281,10 @@ fn map_pairing_http_failure(response: &RtspResponse, path: &str) -> AirPlayError
     match response.status.code {
         401 | 470 => AirPlayError::PairingRequired,
         403 => AirPlayError::AuthenticationFailed {
-            message: format!("{path} 被设备拒绝"),
+            message: format!("{path} was rejected by the receiver"),
         },
         code => AirPlayError::Protocol {
-            message: format!("{path} 返回了未预期状态码 {code}"),
+            message: format!("{path} returned unexpected status {code}"),
         },
     }
 }
@@ -2284,15 +2312,14 @@ mod tests {
         map_pair_pin_start_response,
     };
     use crate::audio::{AudioFormat, AudioSampleType};
-    use crate::config::{ReceiverAuthFlow, ReceiverCredentials};
+    use crate::pairing::{ReceiverAuthFlow, ReceiverCredentials};
     use crate::receiver::{
         AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
     use crate::transport::AirPlayError;
     use crate::transport::RAOP_STARTUP_LATENCY_FRAMES;
-    use crate::transport::RtspResponse;
     use crate::transport::SessionDescriptor;
-    use crate::transport::rtsp::{RtspMethod, RtspRequest, SetupTransport};
+    use crate::transport::rtsp::{RtspMethod, RtspRequest, RtspResponse, SetupTransport};
     use aes::Aes128;
     use aes_gcm::{AeadInPlace as _, KeyInit as _};
     use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
@@ -3970,12 +3997,12 @@ mod tests {
             Some(index) => (&raw[..index], &raw[index + separator.len()..]),
             None => (raw, &[][..]),
         };
-        let head_text =
-            std::str::from_utf8(head).map_err(|_| String::from("RTSP 请求头不是有效 UTF-8"))?;
+        let head_text = std::str::from_utf8(head)
+            .map_err(|_| String::from("RTSP request head is not valid UTF-8"))?;
         let mut lines = head_text.lines();
         let request_line = lines
             .next()
-            .ok_or_else(|| String::from("缺少 RTSP 请求行"))?;
+            .ok_or_else(|| String::from("missing RTSP request line"))?;
         let mut parts = request_line.split_whitespace();
         let method = match parts.next() {
             Some("OPTIONS") => RtspMethod::Options,
@@ -3985,10 +4012,12 @@ mod tests {
             Some("TEARDOWN") => RtspMethod::Teardown,
             Some("GET") => RtspMethod::Get,
             Some("POST") => RtspMethod::Post,
-            Some(other) => return Err(format!("未知 RTSP 方法: {other}")),
-            None => return Err(String::from("缺少 RTSP 方法")),
+            Some(other) => return Err(format!("unknown RTSP method: {other}")),
+            None => return Err(String::from("missing RTSP method")),
         };
-        let uri = parts.next().ok_or_else(|| String::from("缺少 RTSP URI"))?;
+        let uri = parts
+            .next()
+            .ok_or_else(|| String::from("missing RTSP URI"))?;
         let mut request = RtspRequest::new(method, uri);
         for line in lines {
             if let Some((name, value)) = line.split_once(':') {

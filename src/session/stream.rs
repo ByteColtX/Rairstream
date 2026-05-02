@@ -264,7 +264,7 @@ mod tests {
         impl AudioSink for FailingSink {
             fn write(&mut self, _chunk: AudioChunk) -> Result<(), AudioCaptureError> {
                 Err(AudioCaptureError::InvalidFormat {
-                    message: String::from("sink rejected chunk"),
+                    message: String::from("audio sink rejected chunk"),
                 })
             }
         }

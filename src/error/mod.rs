@@ -1,3 +1,5 @@
+//! 贯穿 CLI、应用编排和传输层的顶层错误类型。
+
 use crate::audio::AudioCaptureError;
 use crate::config::ConfigError;
 use crate::transport::AirPlayError;

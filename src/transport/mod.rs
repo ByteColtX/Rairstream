@@ -9,12 +9,11 @@ mod sink;
 use std::fmt::Write;
 
 use crate::audio::AudioFormat;
-use crate::config::ReceiverCredentials;
+use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
 use thiserror::Error;
 
 pub use codec::{AudioResampler, CodecDescription};
-pub use rtsp::{RtspHeaders, RtspMethod, RtspRequest, RtspResponse, RtspStatus};
 pub use session::{
     ModernAirPlayConnection, ModernAirPlaySession, PreparedConnection, PreparedTransportSession,
     RaopConnection, RaopSession,
@@ -96,13 +95,13 @@ impl SessionDescriptor {
 
         if self.frames_per_packet == 0 {
             return Err(AirPlayError::InvalidSession {
-                message: String::from("每个包的帧数必须大于 0"),
+                message: String::from("frames per packet must be greater than 0"),
             });
         }
 
         if !(100..=400).contains(&self.sender_volume_percent) {
             return Err(AirPlayError::InvalidSession {
-                message: String::from("发送端音量百分比必须在 100 到 400 之间"),
+                message: String::from("sender volume percent must be between 100 and 400"),
             });
         }
 
@@ -150,25 +149,25 @@ fn format_device_id(value: u64) -> String {
 /// `AirPlay` 传输层错误。
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum AirPlayError {
-    #[error("音频格式不受支持: {message}")]
+    #[error("unsupported audio format: {message}")]
     UnsupportedAudioFormat { message: String },
     #[error(
-        "目标设备在会话建立前要求认证或配对（常见于 macOS AirPlay Receiver / Apple TV / 受保护接收端）"
+        "target receiver requires authentication or pairing before session setup (common on macOS AirPlay Receiver / Apple TV / protected receivers)"
     )]
     AuthenticationRequired,
-    #[error("AirPlay Receiver 接收端已响应控制探测，但仍需要先完成配对流程")]
+    #[error("AirPlay Receiver responded to control probing but pairing must be completed first")]
     PairingRequired,
-    #[error("AirPlay Receiver 接收端需要可用认证凭据或配对记录")]
+    #[error("AirPlay Receiver requires usable credentials or a saved pairing record")]
     CredentialsMissing,
-    #[error("AirPlay Receiver 认证失败: {message}")]
+    #[error("AirPlay Receiver authentication failed: {message}")]
     AuthenticationFailed { message: String },
-    #[error("RTSP 协议错误: {message}")]
+    #[error("RTSP protocol error: {message}")]
     Protocol { message: String },
-    #[error("连接设备失败: {message}")]
+    #[error("failed to connect to receiver: {message}")]
     ConnectionFailed { message: String },
-    #[error("会话参数无效: {message}")]
+    #[error("invalid session parameters: {message}")]
     InvalidSession { message: String },
-    #[error("会话尚未进入可播放状态")]
+    #[error("session is not ready for playback")]
     NotReady,
 }
 
@@ -317,7 +316,7 @@ mod tests {
     fn authentication_required_error_mentions_pairing_requirement() {
         let message = AirPlayError::AuthenticationRequired.to_string();
 
-        assert!(message.contains("认证或配对"));
+        assert!(message.contains("authentication or pairing"));
         assert!(message.contains("macOS AirPlay Receiver"));
     }
 
@@ -326,12 +325,12 @@ mod tests {
         assert!(
             AirPlayError::PairingRequired
                 .to_string()
-                .contains("配对流程")
+                .contains("pairing")
         );
         assert!(
             AirPlayError::CredentialsMissing
                 .to_string()
-                .contains("认证凭据")
+                .contains("credentials")
         );
         assert!(
             AirPlayError::AuthenticationFailed {

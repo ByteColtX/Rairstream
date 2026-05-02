@@ -1,9 +1,7 @@
 //! 音频采集层：对上层暴露统一的输入抽象。
 
-pub mod codecs;
-pub mod convert;
-pub mod decode;
-pub mod source;
+mod convert;
+mod decode;
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -48,13 +46,16 @@ impl AudioFormat {
     pub fn block_align_bytes(&self) -> Result<usize, AudioCaptureError> {
         if self.channels == 0 {
             return Err(AudioCaptureError::InvalidFormat {
-                message: String::from("声道数必须大于 0"),
+                message: String::from("channel count must be greater than 0"),
             });
         }
 
         if self.bits_per_sample == 0 || self.bits_per_sample % 8 != 0 {
             return Err(AudioCaptureError::InvalidFormat {
-                message: format!("位深必须是 8 的正整数倍，当前为 {}", self.bits_per_sample),
+                message: format!(
+                    "bit depth must be a positive multiple of 8, got {}",
+                    self.bits_per_sample
+                ),
             });
         }
 
@@ -111,23 +112,23 @@ pub trait AudioSink: Send + 'static {
 /// 音频采集层返回的领域错误。
 #[derive(Debug, thiserror::Error)]
 pub enum AudioCaptureError {
-    #[error("当前平台不支持 Windows 回环采集")]
+    #[error("current platform does not support Windows loopback capture")]
     UnsupportedPlatform,
-    #[error("初始化音频运行时失败: {message}")]
+    #[error("failed to initialize audio runtime: {message}")]
     RuntimeInitialization { message: String },
-    #[error("音频格式无效: {message}")]
+    #[error("invalid audio format: {message}")]
     InvalidFormat { message: String },
-    #[error("音频块字节长度 {received} 不是帧对齐 {block_align} 的整数倍")]
+    #[error("audio chunk length {received} is not a multiple of frame alignment {block_align}")]
     InvalidChunkLength { received: usize, block_align: usize },
-    #[error("采集线程启动失败: {source}")]
+    #[error("failed to start capture thread: {source}")]
     ThreadSpawn {
         #[source]
         source: std::io::Error,
     },
-    #[error("采集线程异常退出")]
+    #[error("capture thread exited unexpectedly")]
     CaptureThreadPanicked,
     #[cfg(target_os = "windows")]
-    #[error("WASAPI 调用失败: {0}")]
+    #[error("WASAPI call failed: {0}")]
     Wasapi(#[from] wasapi::WasapiError),
 }
 
@@ -288,6 +289,7 @@ impl WindowsLoopbackCapture {
 }
 
 #[doc(hidden)]
+#[allow(dead_code)]
 pub mod testing {
     use std::collections::VecDeque;
     use std::sync::{
@@ -423,13 +425,13 @@ mod tests {
                 .chunks
                 .lock()
                 .map_err(|_| AudioCaptureError::InvalidFormat {
-                    message: String::from("录制缓存已损坏"),
+                    message: String::from("recording buffer was poisoned"),
                 })?;
             chunks.push(chunk);
             self.notify
                 .send(chunks.len())
                 .map_err(|_| AudioCaptureError::InvalidFormat {
-                    message: String::from("测试通知通道已关闭"),
+                    message: String::from("test notification channel is closed"),
                 })?;
             Ok(())
         }
@@ -445,11 +447,11 @@ mod tests {
             self.notify
                 .send(())
                 .map_err(|_| AudioCaptureError::InvalidFormat {
-                    message: String::from("测试通知通道已关闭"),
+                    message: String::from("test notification channel is closed"),
                 })?;
 
             Err(AudioCaptureError::InvalidFormat {
-                message: String::from("sink rejected chunk"),
+                message: String::from("audio sink rejected chunk"),
             })
         }
     }

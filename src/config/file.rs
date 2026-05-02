@@ -1,3 +1,5 @@
+//! 配置文件的加载、保存与默认路径解析。
+
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};

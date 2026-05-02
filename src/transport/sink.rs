@@ -1,3 +1,5 @@
+//! `RAOP` 音频 `sink`，负责 packet 序列化与 UDP 发送。
+
 use std::sync::{Arc, Mutex};
 
 use crate::audio::{AudioCaptureError, AudioChunk, AudioSink};
@@ -29,6 +31,7 @@ impl Default for RaopSinkConfig {
     }
 }
 
+/// 将统一 `AudioChunk` 转成 `RAOP` RTP 包并持续发送到目标设备。
 #[derive(Debug)]
 pub struct RaopAudioSink {
     resampler: AudioResampler,
@@ -53,7 +56,7 @@ impl RaopAudioSink {
             audio_target = %transport.audio_target,
             control_target = %transport.control_target,
             sync_interval_packets = transport.sink_config.sync_interval_packets,
-            "初始化 RAOP 音频发送端"
+            "initializing RAOP audio sink"
         );
         let mut resampler = AudioResampler::new(source_format);
         let initial_sender_volume_percent = sender_volume_percent
@@ -103,7 +106,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 payload_bytes = bytes.len(),
                 target = %self.transport.audio_target,
-                "发送 RTP 音频包"
+                "sending RTP audio packet"
             );
         }
         if self.first_packet_in_stream
@@ -115,7 +118,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 payload_bytes = bytes.len(),
                 target = %self.transport.audio_target,
-                "发送 RTP 音频包摘要"
+                "sending RTP audio packet summary"
             );
         }
         self.transport
@@ -127,7 +130,7 @@ impl RaopAudioSink {
                     rtp_timestamp = timestamp,
                     target = %self.transport.audio_target,
                     error = %error,
-                    "发送 RTP 音频包失败"
+                    "failed to send RTP audio packet"
                 );
                 AudioCaptureError::RuntimeInitialization {
                     message: error.to_string(),
@@ -161,7 +164,7 @@ impl RaopAudioSink {
                 rtp_timestamp = timestamp,
                 next_rtp_timestamp,
                 target = %self.transport.control_target,
-                "发送 RAOP 同步包"
+                "sending RAOP sync packet"
             );
         }
         trace!(
@@ -170,7 +173,7 @@ impl RaopAudioSink {
             next_rtp_timestamp,
             packet_index = self.sent_audio_packets.saturating_add(1),
             target = %self.transport.control_target,
-            "发送 RAOP 同步包"
+            "sending RAOP sync packet"
         );
         self.transport
             .control_socket
@@ -181,7 +184,7 @@ impl RaopAudioSink {
                     rtp_timestamp = timestamp,
                     target = %self.transport.control_target,
                     error = %error,
-                    "发送 RAOP 同步包失败"
+                    "failed to send RAOP sync packet"
                 );
                 AudioCaptureError::RuntimeInitialization {
                     message: error.to_string(),

@@ -1,3 +1,5 @@
+//! CLI 参数解析与基础校验。
+
 use std::path::PathBuf;
 
 use crate::error::RairstreamError;
