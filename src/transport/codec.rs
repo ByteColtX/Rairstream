@@ -9,6 +9,10 @@ use super::{
     AirPlayError, RAOP_BITS_PER_SAMPLE, RAOP_CHANNELS, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
 };
 
+const CENTER_MIX_GAIN: f64 = 0.707_106_781_186_547_6;
+const SURROUND_MIX_GAIN: f64 = 0.5;
+const LFE_MIX_GAIN: f64 = 0.5;
+
 /// 首版 `RAOP` 发送端使用的固定音频描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodecDescription {
@@ -118,11 +122,11 @@ fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError>
             .map_err(|error| AirPlayError::UnsupportedAudioFormat {
                 message: error.to_string(),
             })?;
-    let left_count =
+    let _left_count =
         u32::try_from(channels.div_ceil(2)).map_err(|_| AirPlayError::UnsupportedAudioFormat {
             message: String::from("声道数超出首版支持范围"),
         })?;
-    let right_count =
+    let _right_count =
         u32::try_from(channels / 2).map_err(|_| AirPlayError::UnsupportedAudioFormat {
             message: String::from("声道数超出首版支持范围"),
         })?;
@@ -130,37 +134,144 @@ fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError>
 
     for frame_index in 0..chunk.frames {
         let frame_offset = frame_index * block_align;
-        let mut left_sum = 0.0_f64;
-        let mut right_sum = 0.0_f64;
-
-        for channel_index in 0..channels {
-            let sample_offset = frame_offset + channel_index * bytes_per_sample;
-            let sample = decode_sample(
-                &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
-                chunk.format,
-            )?;
-
-            if channel_index % 2 == 0 {
-                left_sum += sample;
-            } else {
-                right_sum += sample;
-            }
-        }
-
-        let left = if left_count == 0 {
-            0.0
-        } else {
-            left_sum / f64::from(left_count)
-        };
-        let right = if right_count == 0 {
-            left
-        } else {
-            right_sum / f64::from(right_count)
-        };
-        frames.push([left, right]);
+        frames.push(decode_frame_to_stereo(
+            chunk,
+            frame_offset,
+            channels,
+            bytes_per_sample,
+        )?);
     }
 
     Ok(frames)
+}
+
+fn decode_frame_to_stereo(
+    chunk: &AudioChunk,
+    frame_offset: usize,
+    channels: usize,
+    bytes_per_sample: usize,
+) -> Result<[f64; 2], AirPlayError> {
+    let sample = |channel_index: usize| {
+        let sample_offset = frame_offset + channel_index * bytes_per_sample;
+        decode_sample(
+            &chunk.bytes[sample_offset..sample_offset + bytes_per_sample],
+            chunk.format,
+        )
+    };
+
+    match channels {
+        0 => Err(AirPlayError::UnsupportedAudioFormat {
+            message: String::from("channel count must be greater than 0"),
+        }),
+        1 => {
+            let mono = sample(0)?;
+            Ok([mono, mono])
+        }
+        2 => Ok([sample(0)?, sample(1)?]),
+        3 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let center = sample(2)?;
+            Ok([
+                left + center * CENTER_MIX_GAIN,
+                right + center * CENTER_MIX_GAIN,
+            ])
+        }
+        4 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let back_left = sample(2)?;
+            let back_right = sample(3)?;
+            Ok([
+                left + back_left * SURROUND_MIX_GAIN,
+                right + back_right * SURROUND_MIX_GAIN,
+            ])
+        }
+        5 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let center = sample(2)?;
+            let back_left = sample(3)?;
+            let back_right = sample(4)?;
+            Ok([
+                left + center * CENTER_MIX_GAIN + back_left * SURROUND_MIX_GAIN,
+                right + center * CENTER_MIX_GAIN + back_right * SURROUND_MIX_GAIN,
+            ])
+        }
+        6 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let center = sample(2)?;
+            let lfe = sample(3)?;
+            let back_left = sample(4)?;
+            let back_right = sample(5)?;
+            Ok([
+                left + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_left * SURROUND_MIX_GAIN,
+                right
+                    + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_right * SURROUND_MIX_GAIN,
+            ])
+        }
+        7 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let center = sample(2)?;
+            let lfe = sample(3)?;
+            let back_center = sample(4)?;
+            let side_left = sample(5)?;
+            let side_right = sample(6)?;
+            Ok([
+                left + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_center * SURROUND_MIX_GAIN
+                    + side_left * SURROUND_MIX_GAIN,
+                right
+                    + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_center * SURROUND_MIX_GAIN
+                    + side_right * SURROUND_MIX_GAIN,
+            ])
+        }
+        8 => {
+            let left = sample(0)?;
+            let right = sample(1)?;
+            let center = sample(2)?;
+            let lfe = sample(3)?;
+            let back_left = sample(4)?;
+            let back_right = sample(5)?;
+            let side_left = sample(6)?;
+            let side_right = sample(7)?;
+            Ok([
+                left + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_left * SURROUND_MIX_GAIN
+                    + side_left * SURROUND_MIX_GAIN,
+                right
+                    + center * CENTER_MIX_GAIN
+                    + lfe * LFE_MIX_GAIN
+                    + back_right * SURROUND_MIX_GAIN
+                    + side_right * SURROUND_MIX_GAIN,
+            ])
+        }
+        _ => {
+            let mut left = sample(0)?;
+            let mut right = sample(1)?;
+
+            for channel_index in 2..channels {
+                let channel_sample = sample(channel_index)?;
+                if channel_index % 2 == 0 {
+                    left += channel_sample * SURROUND_MIX_GAIN;
+                } else {
+                    right += channel_sample * SURROUND_MIX_GAIN;
+                }
+            }
+
+            Ok([left, right])
+        }
+    }
 }
 
 fn apply_gain(frames: &mut [[f64; 2]], gain_multiplier: f64) {
@@ -360,7 +471,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [0.8_f32, 0.2, 0.4, 0.6]
+            [0.4_f32, 0.2, 0.1, 0.3]
                 .into_iter()
                 .flat_map(f32::to_le_bytes)
                 .collect(),
@@ -370,8 +481,8 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.6).abs() < 0.001);
-        assert!((frames[0][1] - 0.4).abs() < 0.001);
+        assert!((frames[0][0] - 0.45).abs() < 0.001);
+        assert!((frames[0][1] - 0.35).abs() < 0.001);
     }
 
     #[test]
@@ -400,7 +511,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [1_610_612_736_i32, 536_870_912, 1_073_741_824, 1_073_741_824]
+            [1_073_741_824_i32, 536_870_912, 536_870_912, 1_073_741_824]
                 .into_iter()
                 .flat_map(i32::to_le_bytes)
                 .collect(),
@@ -411,7 +522,7 @@ mod tests {
 
         assert_eq!(frames.len(), 1);
         assert!((frames[0][0] - 0.625).abs() < 0.001);
-        assert!((frames[0][1] - 0.375).abs() < 0.001);
+        assert!((frames[0][1] - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -425,7 +536,7 @@ mod tests {
         let chunk = AudioChunk::new(
             format,
             [
-                0x00_u8, 0x00, 0x40, 0x00, 0x00, 0x20, 0x00, 0x00, 0x20, 0x00, 0x00, 0x40,
+                0x00_u8, 0x00, 0x20, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00, 0x00, 0x20,
             ]
             .into_iter()
             .collect(),
@@ -435,12 +546,12 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.375).abs() < 0.001);
-        assert!((frames[0][1] - 0.375).abs() < 0.001);
+        assert!((frames[0][0] - 0.3125).abs() < 0.001);
+        assert!((frames[0][1] - 0.25).abs() < 0.001);
     }
 
     #[test]
-    fn downmixes_six_channel_input_to_stereo_by_odd_even_groups() {
+    fn keeps_front_left_and_right_level_for_six_channel_input() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
             channels: 6,
@@ -449,7 +560,7 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [30_000_i16, 6_000, 24_000, 12_000, 18_000, 18_000]
+            [20_000_i16, -20_000, 0, 0, 0, 0]
                 .into_iter()
                 .flat_map(i16::to_le_bytes)
                 .collect(),
@@ -459,12 +570,12 @@ mod tests {
         let frames = decode_and_downmix(&chunk).unwrap();
 
         assert_eq!(frames.len(), 1);
-        assert!((frames[0][0] - 0.7324).abs() < 0.001);
-        assert!((frames[0][1] - 0.3662).abs() < 0.001);
+        assert!((frames[0][0] - 0.6104).abs() < 0.001);
+        assert!((frames[0][1] + 0.6104).abs() < 0.001);
     }
 
     #[test]
-    fn downmixes_eight_channel_input_to_stereo_by_odd_even_groups() {
+    fn keeps_front_left_and_right_level_for_eight_channel_input() {
         let format = AudioFormat {
             sample_rate_hz: 48_000,
             channels: 8,
@@ -473,12 +584,10 @@ mod tests {
         };
         let chunk = AudioChunk::new(
             format,
-            [
-                32_000_i16, 4_000, 24_000, 8_000, 16_000, 12_000, 8_000, 16_000,
-            ]
-            .into_iter()
-            .flat_map(i16::to_le_bytes)
-            .collect(),
+            [20_000_i16, -20_000, 0, 0, 0, 0, 0, 0]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect(),
         )
         .unwrap();
 
@@ -486,7 +595,7 @@ mod tests {
 
         assert_eq!(frames.len(), 1);
         assert!((frames[0][0] - 0.6104).abs() < 0.001);
-        assert!((frames[0][1] - 0.3052).abs() < 0.001);
+        assert!((frames[0][1] + 0.6104).abs() < 0.001);
     }
 
     #[test]
