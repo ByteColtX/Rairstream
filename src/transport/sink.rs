@@ -72,8 +72,7 @@ impl RaopAudioSink {
         let mut resampler = AudioResampler::new(source_format);
         let initial_sender_volume_percent = sender_volume_percent
             .lock()
-            .map(|sender_volume_percent| *sender_volume_percent)
-            .unwrap_or(100);
+            .map_or(100, |sender_volume_percent| *sender_volume_percent);
         resampler.set_sender_volume_percent(initial_sender_volume_percent);
         Self {
             resampler,

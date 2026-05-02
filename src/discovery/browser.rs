@@ -69,11 +69,7 @@ fn discover_service_type(
     let deadline = Instant::now() + timeout;
     let mut services = Vec::new();
 
-    loop {
-        let Some(wait_time) = deadline.checked_duration_since(Instant::now()) else {
-            break;
-        };
-
+    while let Some(wait_time) = deadline.checked_duration_since(Instant::now()) {
         let Ok(event) = receiver.recv_timeout(wait_time) else {
             break;
         };
