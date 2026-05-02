@@ -31,6 +31,8 @@
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
+    - [Option A: Download A Prebuilt Binary](#option-a-download-a-prebuilt-binary)
+    - [Option B: Build From Source](#option-b-build-from-source)
 - [Usage](#usage)
   - [Discover And Inspect Receivers](#discover-and-inspect-receivers)
   - [Pair For The First Time](#pair-for-the-first-time)
@@ -94,6 +96,21 @@ The currently validated paths are:
 
 ### Installation
 
+#### Option A: Download A Prebuilt Binary
+
+If you just want to use the CLI instead of building from source, prefer the prebuilt binaries from GitHub Releases:
+
+- download page: [Releases](https://github.com/ByteColtX/Rairstream/releases)
+- Windows x64: `rairstream-vX.Y.Z-windows-x86_64.zip`
+- Windows ARM64: `rairstream-vX.Y.Z-windows-arm64.zip`
+- checksum file: matching `.sha256`
+
+After extracting the archive, you can run `rairstream.exe` directly, or add its directory to `PATH` and use `rairstream`.
+
+#### Option B: Build From Source
+
+If you want to build it yourself or contribute to development:
+
 1. Clone the repository
 
    ```bash
@@ -104,30 +121,20 @@ The currently validated paths are:
 2. Build the project
 
    ```bash
-   cargo build
+   cargo build --release
    ```
 
-3. Run the CLI
-
-   ```bash
-   cargo run -- discover
-   ```
-
-4. If you want to run the binary directly:
-
-   - debug build: `target\debug\rairstream.exe`
-   - release build: `target\release\rairstream.exe`
-   - example:
+3. Run the locally built binary
 
    ```bash
    target\release\rairstream.exe discover
    ```
 
-If you want a release build first:
+4. If you prefer starting through Cargo, you can also use:
 
-```bash
-cargo build --release
-```
+   ```bash
+   cargo run -- discover
+   ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -139,28 +146,18 @@ Current CLI surface:
 rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>
 ```
 
-```bash
-rairstream discover
-rairstream inspect --device <selector>
-rairstream pair --device <selector> [--pin <PIN>]
-rairstream paired list
-rairstream paired forget --device <selector>
-rairstream play file <path> --device <selector>...
-rairstream play capture --device <selector>...
-```
-
 ### Discover And Inspect Receivers
 
 Discover receivers:
 
 ```bash
-cargo run -- discover
+rairstream discover
 ```
 
 Inspect receiver details:
 
 ```bash
-cargo run -- inspect --device 001122334455
+rairstream inspect --device 001122334455
 ```
 
 `inspect` reports receiver metadata such as profile, auth method, pairing mode, codecs, support state, and grouping-related fields.
@@ -170,7 +167,7 @@ cargo run -- inspect --device 001122334455
 Interactive pairing:
 
 ```bash
-cargo run -- pair --device 001122334455
+rairstream pair --device 001122334455
 ```
 
 This requests the receiver to show a PIN, then prompts for that PIN in the terminal.
@@ -178,37 +175,37 @@ This requests the receiver to show a PIN, then prompts for that PIN in the termi
 Non-interactive pairing:
 
 ```bash
-cargo run -- pair --device 001122334455 --pin 123456
+rairstream pair --device 001122334455 --pin 123456
 ```
 
 List saved pairings:
 
 ```bash
-cargo run -- paired list
+rairstream paired list
 ```
 
 Forget a saved pairing:
 
 ```bash
-cargo run -- paired forget --device 001122334455
+rairstream paired forget --device 001122334455
 ```
 
 ### Play A Local Audio File
 
 ```bash
-cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device 001122334455
+rairstream play file "%WINDIR%\Media\Alarm01.wav" --device 001122334455
 ```
 
 Multi-device playback:
 
 ```bash
-cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device "Living Room" --device "Kitchen"
+rairstream play file "%WINDIR%\Media\Alarm01.wav" --device "Living Room" --device "Kitchen"
 ```
 
 ### Stream System Audio In Real Time
 
 ```bash
-cargo run -- play capture --device 001122334455
+rairstream play capture --device 001122334455
 ```
 
 This currently uses Windows `WASAPI shared loopback`. Press `Ctrl+C` to stop the session.
@@ -223,7 +220,10 @@ This currently uses Windows `WASAPI shared loopback`. Press `Ctrl+C` to stop the
 - host such as `192.168.1.20`
 - `host:port` such as `192.168.1.20:7000`
 
-Resolution prefers exact matches first. If no exact match exists, the CLI falls back to a partial name match.
+Resolution prefers:
+
+- exact matches first
+- a partial name match only when no exact match exists
 
 ### Configuration
 

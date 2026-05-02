@@ -31,6 +31,8 @@
 - [开始使用](#开始使用)
   - [环境要求](#环境要求)
   - [安装](#安装)
+    - [方式 A：下载预编译二进制](#方式-a下载预编译二进制)
+    - [方式 B：从源码构建](#方式-b从源码构建)
 - [使用方式](#使用方式)
   - [发现与检查设备](#发现与检查设备)
   - [首次配对](#首次配对)
@@ -94,6 +96,21 @@ Rairstream 的目标，是把 AirPlay / RAOP 音频发送整理成一套清晰�
 
 ### 安装
 
+#### 方式 A：下载预编译二进制
+
+如果你只是希望直接使用 CLI，而不是参与开发，优先使用 GitHub Releases 中的预编译二进制包：
+
+- 下载页面：[Releases](https://github.com/ByteColtX/Rairstream/releases)
+- Windows x64：`rairstream-vX.Y.Z-windows-x86_64.zip`
+- Windows ARM64：`rairstream-vX.Y.Z-windows-arm64.zip`
+- 校验文件：对应的 `.sha256`
+
+解压后可直接运行 `rairstream.exe`，也可以把它所在目录加入 `PATH` 后直接使用 `rairstream`。
+
+#### 方式 B：从源码构建
+
+如果你希望自行构建或参与开发：
+
 1. 克隆仓库
 
    ```bash
@@ -104,30 +121,20 @@ Rairstream 的目标，是把 AirPlay / RAOP 音频发送整理成一套清晰�
 2. 构建项目
 
    ```bash
-   cargo build
+   cargo build --release
    ```
 
-3. 直接运行 CLI
-
-   ```bash
-   cargo run -- discover
-   ```
-
-4. 如果你希望直接使用二进制：
-
-   - 开发构建：`target\debug\rairstream.exe`
-   - 发布构建：`target\release\rairstream.exe`
-   - 例如：
+3. 直接运行本地构建出的二进制
 
    ```bash
    target\release\rairstream.exe discover
    ```
 
-如果你希望先做 release 构建：
+4. 如果你更习惯通过 Cargo 启动，也可以使用：
 
-```bash
-cargo build --release
-```
+   ```bash
+   cargo run -- discover
+   ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -139,28 +146,18 @@ cargo build --release
 rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>
 ```
 
-```bash
-rairstream discover
-rairstream inspect --device <selector>
-rairstream pair --device <selector> [--pin <PIN>]
-rairstream paired list
-rairstream paired forget --device <selector>
-rairstream play file <path> --device <selector>...
-rairstream play capture --device <selector>...
-```
-
 ### 发现与检查设备
 
 发现设备：
 
 ```bash
-cargo run -- discover
+rairstream discover
 ```
 
 检查设备详情：
 
 ```bash
-cargo run -- inspect --device 001122334455
+rairstream inspect --device 001122334455
 ```
 
 `inspect` 会输出 receiver 的 profile、auth、pairing、codecs、support、group 等元数据。
@@ -170,7 +167,7 @@ cargo run -- inspect --device 001122334455
 交互式配对：
 
 ```bash
-cargo run -- pair --device 001122334455
+rairstream pair --device 001122334455
 ```
 
 这条命令会先请求接收端显示 PIN，然后在终端中提示输入 PIN。
@@ -178,37 +175,37 @@ cargo run -- pair --device 001122334455
 非交互式配对：
 
 ```bash
-cargo run -- pair --device 001122334455 --pin 123456
+rairstream pair --device 001122334455 --pin 123456
 ```
 
 查看已保存配对：
 
 ```bash
-cargo run -- paired list
+rairstream paired list
 ```
 
 移除已保存配对：
 
 ```bash
-cargo run -- paired forget --device 001122334455
+rairstream paired forget --device 001122334455
 ```
 
 ### 播放本地音频文件
 
 ```bash
-cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device 001122334455
+rairstream play file "%WINDIR%\Media\Alarm01.wav" --device 001122334455
 ```
 
 多设备播放：
 
 ```bash
-cargo run -- play file "%WINDIR%\Media\Alarm01.wav" --device "Living Room" --device "Kitchen"
+rairstream play file "%WINDIR%\Media\Alarm01.wav" --device "Living Room" --device "Kitchen"
 ```
 
 ### 实时串流系统音频
 
 ```bash
-cargo run -- play capture --device 001122334455
+rairstream play capture --device 001122334455
 ```
 
 当前这条路径走的是 Windows `WASAPI shared loopback`。运行后按 `Ctrl+C` 停止。
@@ -223,7 +220,10 @@ cargo run -- play capture --device 001122334455
 - 主机地址，例如 `192.168.1.20`
 - `host:port`，例如 `192.168.1.20:7000`
 
-匹配逻辑上，优先使用 exact match；如果没有 exact match，再回退到设备名的 partial match。
+匹配逻辑上：
+
+- 优先使用 exact match
+- 如果没有 exact match，再回退到设备名的 partial match
 
 ### 配置文件
 
