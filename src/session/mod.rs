@@ -1,6 +1,7 @@
 mod connect;
 pub mod group;
 pub mod planner;
+mod raop;
 mod stream;
 pub(crate) mod transport;
 
@@ -13,10 +14,10 @@ use thiserror::Error;
 
 pub use connect::{pair_receiver_with_pin, request_pairing_pin_display};
 pub use planner::{PlannedTiming, PlannedTransport, SessionPlan, plan_session};
+pub use raop::{RaopConnection, RaopSession, RaopSessionState};
 pub use stream::{PlaybackSession, play_capture, play_file};
 pub use transport::{
-    ModernAirPlayConnection, ModernAirPlaySession, PreparedSession, RaopConnection, RaopSession,
-    RaopSessionState, SessionConnection,
+    ModernAirPlayConnection, ModernAirPlaySession, PreparedSession, SessionConnection,
 };
 
 /// 建立会话前需要的最小上下文。
