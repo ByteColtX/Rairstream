@@ -166,7 +166,7 @@ fn fail_after_cleanup<T>(
 }
 
 fn teardown_connections(connections: Vec<ConnectedReceiver>) -> Result<(), RairstreamError> {
-    let mut first_error = None;
+    let mut first_error: Option<crate::session::AirPlayError> = None;
     for connection in connections {
         if let Err(error) = connection.connection.teardown() {
             if first_error.is_none() {

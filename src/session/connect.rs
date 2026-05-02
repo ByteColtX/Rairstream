@@ -6,14 +6,13 @@ use crate::config::MAX_SENDER_VOLUME_PERCENT;
 use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
-use crate::transport::{
-    PreparedConnection, PreparedTransportSession, RaopAudioSink, SessionDescriptor,
-};
+use crate::session::{PreparedSession, SessionConnection, SessionDescriptor};
+use crate::transport::RaopAudioSink;
 
 use super::group::FanoutAudioSink;
 
 pub struct ConnectedReceiver {
-    pub connection: PreparedConnection,
+    pub connection: SessionConnection,
 }
 
 impl ConnectedReceiver {
@@ -45,7 +44,7 @@ pub fn connect_receivers(
         if let Some(credentials) = paired_receivers.get(&receiver.id).cloned() {
             descriptor = descriptor.with_receiver_credentials(credentials);
         }
-        let connection = PreparedTransportSession::prepare(&descriptor)?.handshake()?;
+        let connection = PreparedSession::prepare(&descriptor)?.handshake()?;
         connected.push(ConnectedReceiver { connection });
     }
 
@@ -64,7 +63,7 @@ pub fn pair_receiver_with_pin(
         descriptor = descriptor.with_receiver_credentials(credentials);
     }
 
-    PreparedTransportSession::prepare(&descriptor)?
+    PreparedSession::prepare(&descriptor)?
         .pair_with_pin(pin)
         .map_err(Into::into)
 }
@@ -80,7 +79,7 @@ pub fn request_pairing_pin_display(
         descriptor = descriptor.with_receiver_credentials(credentials);
     }
 
-    PreparedTransportSession::prepare(&descriptor)?
+    PreparedSession::prepare(&descriptor)?
         .request_pairing_pin_display()
         .map_err(Into::into)
 }

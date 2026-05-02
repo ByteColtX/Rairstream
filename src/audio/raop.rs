@@ -1,21 +1,25 @@
 //! 输入音频的 `decode`、`downmix`、`resample` 与 `packetize` 路径。
-
 use std::mem;
 
 use num_traits::ToPrimitive;
 
-use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
+use super::{AudioChunk, AudioFormat, AudioSampleType};
 use crate::config::MAX_SENDER_VOLUME_PERCENT;
+use crate::session::AirPlayError;
 
-use super::{
-    AirPlayError, RAOP_BITS_PER_SAMPLE, RAOP_CHANNELS, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ,
-};
+pub(crate) const RAOP_SAMPLE_RATE_HZ: u32 = 44_100;
+pub(crate) const RAOP_CHANNELS: u16 = 2;
+pub(crate) const RAOP_BITS_PER_SAMPLE: u16 = 16;
+pub(crate) const RAOP_FRAMES_PER_PACKET: usize = 352;
+pub(crate) const RAOP_STARTUP_LATENCY_MILLIS: u32 = 250;
+pub(crate) const RAOP_STARTUP_LATENCY_FRAMES: u32 =
+    RAOP_STARTUP_LATENCY_MILLIS * RAOP_SAMPLE_RATE_HZ / 1_000;
 
 const CENTER_MIX_GAIN: f64 = 0.707_106_781_186_547_6;
 const SURROUND_MIX_GAIN: f64 = 0.5;
 const LFE_MIX_GAIN: f64 = 0.5;
 
-/// 首版 `RAOP` 发送端使用的固定音频描述。
+/// 经典 `RAOP` 发送端使用的固定音频描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodecDescription {
     pub encoding_name: &'static str,
@@ -34,7 +38,7 @@ impl CodecDescription {
     }
 }
 
-/// 将输入 `AudioChunk` 重采样并切成 `RAOP` 所需的 PCM packet。
+/// 将输入 `AudioChunk` 重采样并切成 `RAOP` 所需的 `PCM packet`。
 #[derive(Debug, Clone)]
 pub struct AudioResampler {
     source_format: AudioFormat,
@@ -104,15 +108,6 @@ impl AudioResampler {
             &mut self.pending_output_frames,
         ))
     }
-}
-
-pub fn validate_input_format(format: AudioFormat) -> Result<(), AirPlayError> {
-    format
-        .block_align_bytes()
-        .map(|_| ())
-        .map_err(|error| AirPlayError::UnsupportedAudioFormat {
-            message: error.to_string(),
-        })
 }
 
 fn decode_and_downmix(chunk: &AudioChunk) -> Result<Vec<[f64; 2]>, AirPlayError> {
@@ -419,11 +414,18 @@ fn quantize_sample(sample: f64) -> i16 {
 mod tests {
     use super::{
         AudioResampler, CodecDescription, decode_and_downmix, encode_pcm_packet, protect_peak,
-        validate_input_format,
     };
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
     use crate::config::MAX_SENDER_VOLUME_PERCENT;
-    use crate::transport::AirPlayError;
+    use crate::session::AirPlayError;
+
+    fn validate_input_format(format: AudioFormat) -> Result<(), AirPlayError> {
+        format.block_align_bytes().map(|_| ()).map_err(|error| {
+            AirPlayError::UnsupportedAudioFormat {
+                message: error.to_string(),
+            }
+        })
+    }
 
     #[test]
     fn pcm_codec_description_matches_raop_mvp() {

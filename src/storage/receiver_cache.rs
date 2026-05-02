@@ -8,7 +8,8 @@ pub fn cache_receivers(config: &mut AppConfig, receivers: &[Receiver]) {
             name: receiver.name.clone(),
             host: receiver.host.clone(),
             port: receiver.port,
-            receiver_kind: receiver.receiver_kind,
+            transport_profile: receiver.transport_profile,
+            receiver_kind: receiver.transport_profile,
         });
     }
 }

@@ -2,6 +2,7 @@
 
 mod convert;
 mod decode;
+mod raop;
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -12,8 +13,11 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 
-pub use crate::transport::AudioResampler;
 pub use decode::FileChunkDecoder;
+pub use raop::AudioResampler;
+pub(crate) use raop::{CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES};
+#[cfg(test)]
+pub(crate) use raop::{RAOP_SAMPLE_RATE_HZ, RAOP_STARTUP_LATENCY_MILLIS};
 
 /// PCM 样本的数据语义。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

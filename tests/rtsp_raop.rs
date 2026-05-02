@@ -1,4 +1,4 @@
-use rairstream::rtsp::raop::RaopSession;
+use rairstream::session::RaopSession;
 
 #[test]
 fn raop_transport_name_remains_stable() {

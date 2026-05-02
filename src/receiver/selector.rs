@@ -116,7 +116,7 @@ pub fn resolve_receivers(
 #[cfg(test)]
 mod tests {
     use crate::receiver::{
-        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+        AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
 
     use super::{resolve_receiver, resolve_receivers};
@@ -128,12 +128,13 @@ mod tests {
             host: host.to_string(),
             port: 7000,
             generation: AirPlayGeneration::AirPlay1,
-            pairing_id: None,
-            receiver_public_key: None,
-            receiver_kind: ReceiverKind::ClassicRaop,
-            support: DeviceSupport::Supported,
+            transport_profile: ReceiverKind::ClassicRaop,
+            support_level: DeviceSupport::Supported,
+            auth_method: AuthMethod::None,
             capabilities: ReceiverCapabilities::default(),
+            ..Receiver::default()
         }
+        .with_compat_fields()
     }
 
     #[test]

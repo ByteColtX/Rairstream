@@ -1,17 +1,28 @@
 //! `RAOP` 音频 `sink`，负责 packet 序列化与 UDP 发送。
 
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 
-use crate::audio::{AudioCaptureError, AudioChunk, AudioSink};
+use crate::audio::{
+    AudioCaptureError, AudioChunk, AudioResampler, AudioSink, RAOP_FRAMES_PER_PACKET,
+};
 use crate::timing::clock::ntp_timestamp_now;
 
-use super::RAOP_FRAMES_PER_PACKET;
-use super::codec::AudioResampler;
-use super::packet::{RaopSyncPacket, RtpAudioPacket};
-use super::session::RaopStreamTransport;
+use super::packet::{RaopPacketCounters, RaopSyncPacket, RtpAudioPacket};
 use tracing::{debug, trace, warn};
 
 const RAOP_AUDIO_PAYLOAD_TYPE: u8 = 96;
+
+#[derive(Debug)]
+pub struct RaopStreamTransport {
+    pub audio_socket: UdpSocket,
+    pub control_socket: UdpSocket,
+    pub audio_target: SocketAddr,
+    pub control_target: SocketAddr,
+    pub audio_ssrc: u32,
+    pub packet_counters: RaopPacketCounters,
+    pub sink_config: RaopSinkConfig,
+}
 
 /// `RAOP` 音频发送端的最小配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,9 +228,8 @@ mod tests {
 
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType, AudioSink};
 
-    use super::{RaopAudioSink, RaopSinkConfig};
+    use super::{RaopAudioSink, RaopSinkConfig, RaopStreamTransport};
     use crate::transport::packet::RaopPacketCounters;
-    use crate::transport::session::RaopStreamTransport;
     use std::sync::{Arc, Mutex};
 
     #[test]

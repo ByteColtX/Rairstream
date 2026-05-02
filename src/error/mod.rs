@@ -2,7 +2,7 @@
 
 use crate::audio::AudioCaptureError;
 use crate::config::ConfigError;
-use crate::transport::AirPlayError;
+use crate::session::AirPlayError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -34,7 +34,7 @@ pub enum RairstreamError {
     #[error(transparent)]
     Audio(#[from] AudioCaptureError),
     #[error(transparent)]
-    Transport(#[from] AirPlayError),
+    Session(#[from] AirPlayError),
     #[error(transparent)]
     Config(#[from] ConfigError),
 }

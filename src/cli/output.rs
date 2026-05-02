@@ -1,12 +1,11 @@
 //! CLI 输出格式化与终端打印。
-
-use std::path::Path;
-
 use crate::app::{InspectResult, PairedReceiverEntry};
 use crate::pairing::ReceiverAuthFlow;
 use crate::receiver::{
-    CodecKind, DeviceSupport, PairingRequirement, Receiver, ReceiverKind, UnsupportedReason,
+    AuthMethod, CodecKind, PairingRequirement, RaopEncryptionType, Receiver, SupportLevel,
+    SupportReason, TransportProfile,
 };
+use std::path::Path;
 
 pub fn print_receivers(receivers: &[Receiver]) {
     if receivers.is_empty() {
@@ -70,24 +69,65 @@ pub fn print_play_capture_stopped(selectors: &[String]) {
 
 fn format_receiver(receiver: &Receiver) -> String {
     format!(
-        "receiver | name={} | id={} | endpoint={} | kind={} | support={} | pairing={} | codecs={}",
+        "receiver | name={} | id={} | endpoint={} | profile={} | support={} | auth={} | pairing={} | codecs={}",
         quoted_value(&receiver.name),
         receiver.id,
         receiver.endpoint(),
-        format_receiver_kind(receiver.receiver_kind),
-        format_support(&receiver.support),
+        format_transport_profile(receiver.transport_profile),
+        format_support_level(&receiver.support_level),
+        format_auth_method(receiver.auth_method),
         format_pairing_requirement(receiver.capabilities.pairing),
         format_codecs(&receiver.capabilities.codecs),
     )
 }
 
 fn format_inspect(result: &InspectResult) -> String {
-    format!(
-        "{} | multiroom={} | stored_credentials={}",
-        format_receiver(&result.receiver),
-        yes_no(result.receiver.capabilities.supports_multiroom),
-        yes_no(result.has_stored_credentials),
-    )
+    let receiver = &result.receiver;
+    let mut fields = vec![
+        format_receiver(receiver),
+        format!(
+            "stored_credentials={}",
+            yes_no(result.has_stored_credentials)
+        ),
+        format!(
+            "model={}",
+            quoted_optional(receiver.model.as_deref(), "<unknown model>")
+        ),
+        format!("source_version={}", receiver.source_version),
+        format!("features={}", receiver.features.to_txt_value()),
+        format!("status_flags=0x{:X}", receiver.status_flags),
+        format!(
+            "ptp={}",
+            format_runtime_capability(receiver.capabilities.supports_ptp)
+        ),
+        format!(
+            "multiroom={}",
+            format_runtime_capability(receiver.capabilities.supports_multiroom)
+        ),
+        format!(
+            "pairing_identity={}",
+            quoted_optional(receiver.pairing_identity.as_deref(), "<none>")
+        ),
+        format!(
+            "system_pairing_identity={}",
+            quoted_optional(receiver.system_pairing_identity.as_deref(), "<none>")
+        ),
+        format!(
+            "group_name={}",
+            quoted_optional(receiver.group_public_name.as_deref(), "<none>")
+        ),
+        format!("raop_codecs={}", format_codecs(&receiver.raop.codecs)),
+        format!(
+            "raop_encryption={}",
+            format_raop_encryption(&receiver.raop.encryption_types)
+        ),
+    ];
+
+    if let Some(transport) = receiver.raop.transport.as_deref() {
+        fields.push(format!("raop_transport={}", quoted_value(transport)));
+    }
+
+    fields.join(" | ")
 }
 
 fn format_paired(entry: &PairedReceiverEntry, status: Option<&str>) -> String {
@@ -117,6 +157,10 @@ fn format_pairing_pin_requested(receiver_name: &str) -> String {
 }
 
 fn format_codecs(codecs: &[CodecKind]) -> String {
+    if codecs.is_empty() {
+        return String::from("<none>");
+    }
+
     codecs
         .iter()
         .map(|codec| match codec {
@@ -128,10 +172,29 @@ fn format_codecs(codecs: &[CodecKind]) -> String {
         .join(",")
 }
 
-fn format_receiver_kind(kind: ReceiverKind) -> &'static str {
-    match kind {
-        ReceiverKind::ClassicRaop => "classic_raop",
-        ReceiverKind::ModernAirPlayAuth => "modern_airplay_auth",
+fn format_raop_encryption(encryption_types: &[RaopEncryptionType]) -> String {
+    if encryption_types.is_empty() {
+        return String::from("<none>");
+    }
+
+    encryption_types
+        .iter()
+        .map(|encryption| match encryption {
+            RaopEncryptionType::None => String::from("none"),
+            RaopEncryptionType::Rsa => String::from("rsa"),
+            RaopEncryptionType::FairPlay => String::from("fairplay"),
+            RaopEncryptionType::MfiSap => String::from("mfi_sap"),
+            RaopEncryptionType::FairPlaySapV25 => String::from("fairplay_sap_v25"),
+            RaopEncryptionType::Unknown(code) => format!("unknown({code})"),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_transport_profile(profile: TransportProfile) -> &'static str {
+    match profile {
+        TransportProfile::Raop => "raop",
+        TransportProfile::ModernAuthRaop => "modern_auth_raop",
     }
 }
 
@@ -150,28 +213,51 @@ fn format_auth_flow(auth_flow: &ReceiverAuthFlow) -> &'static str {
     }
 }
 
-fn format_support(support: &DeviceSupport) -> String {
-    match support {
-        DeviceSupport::Supported => String::from("supported"),
-        DeviceSupport::Experimental { reason } => {
-            format!("experimental({})", format_unsupported_reason(*reason))
+fn format_auth_method(auth_method: AuthMethod) -> &'static str {
+    match auth_method {
+        AuthMethod::None => "none",
+        AuthMethod::LegacyPin => "legacy_pin",
+        AuthMethod::HomeKitTransient => "homekit_transient",
+        AuthMethod::FairPlayRequired => "fairplay_required",
+        AuthMethod::MfiRequired => "mfi_required",
+    }
+}
+
+fn format_support_level(support_level: &SupportLevel) -> String {
+    match support_level {
+        SupportLevel::Supported => String::from("supported"),
+        SupportLevel::Experimental { reason } => {
+            format!("experimental({})", format_support_reason(*reason))
         }
-        DeviceSupport::Unsupported { reason } => {
-            format!("unsupported({})", format_unsupported_reason(*reason))
+        SupportLevel::Unsupported { reason } => {
+            format!("unsupported({})", format_support_reason(*reason))
         }
     }
 }
 
-fn format_unsupported_reason(reason: UnsupportedReason) -> &'static str {
+fn format_support_reason(reason: SupportReason) -> &'static str {
     match reason {
-        UnsupportedReason::AuthenticationRequiredReceiver => "authentication_required_receiver",
-        UnsupportedReason::PlatformCaptureUnsupported => "platform_capture_unsupported",
-        UnsupportedReason::ExperimentalAirPlay2 => "experimental_airplay2",
+        SupportReason::FairPlayUnsupported => "fairplay_unsupported",
+        SupportReason::MfiAuthenticationRequired => "mfi_authentication_required",
+        SupportReason::PlatformCaptureUnsupported => "platform_capture_unsupported",
+        SupportReason::RuntimePathDisabled => "runtime_path_disabled",
+    }
+}
+
+fn format_runtime_capability(enabled: bool) -> &'static str {
+    if enabled {
+        "yes(runtime_path_disabled)"
+    } else {
+        "no"
     }
 }
 
 fn quoted_value(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\\\""))
+}
+
+fn quoted_optional(value: Option<&str>, fallback: &str) -> String {
+    quoted_value(value.unwrap_or(fallback))
 }
 
 fn format_selector_list(selectors: &[String]) -> String {
@@ -191,8 +277,8 @@ mod tests {
     use crate::app::{InspectResult, PairedReceiverEntry};
     use crate::pairing::ReceiverAuthFlow;
     use crate::receiver::{
-        AirPlayGeneration, CodecKind, DeviceSupport, PairingRequirement, Receiver,
-        ReceiverCapabilities, ReceiverKind,
+        AirPlayGeneration, AuthMethod, CodecKind, Features, PairingRequirement, RaopEncryptionType,
+        RaopMetadata, Receiver, ReceiverCapabilities, SupportLevel, TransportProfile, Version,
     };
 
     use super::{
@@ -207,10 +293,18 @@ mod tests {
             host: String::from("192.168.1.20"),
             port: 7000,
             generation: AirPlayGeneration::AirPlay2,
-            pairing_id: Some(String::from("receiver-pairing-id")),
+            transport_profile: TransportProfile::ModernAuthRaop,
+            support_level: SupportLevel::Supported,
+            auth_method: AuthMethod::HomeKitTransient,
+            model: Some(String::from("Mac16,10")),
+            source_version: Version::new(940, 23, 1),
+            features: Features::from_txt_value("0x4A7FCFD5,0x38174FDE").unwrap(),
+            status_flags: 0x204,
+            pairing_identity: Some(String::from("receiver-pairing-id")),
+            system_pairing_identity: Some(String::from("system-pairing-id")),
             receiver_public_key: None,
-            receiver_kind: ReceiverKind::ModernAirPlayAuth,
-            support: DeviceSupport::Supported,
+            group_id: Some(String::from("group-id")),
+            group_public_name: Some(String::from("Everywhere")),
             capabilities: ReceiverCapabilities {
                 codecs: vec![CodecKind::L16, CodecKind::Alac],
                 pairing: PairingRequirement::PinOrCredentials,
@@ -218,14 +312,25 @@ mod tests {
                 supports_ptp: true,
                 supports_retransmit: true,
             },
+            raop: RaopMetadata {
+                port: Some(7000),
+                codecs: vec![CodecKind::L16, CodecKind::Alac],
+                encryption_types: vec![RaopEncryptionType::Rsa],
+                transport: Some(String::from("UDP")),
+                metadata_types: vec![0, 1, 2],
+                digest_auth: false,
+                ..RaopMetadata::default()
+            },
+            ..Receiver::default()
         }
+        .with_compat_fields()
     }
 
     #[test]
     fn format_receiver_uses_stable_field_order() {
         assert_eq!(
             format_receiver(&build_receiver()),
-            "receiver | name=\"Living Room\" | id=living-room | endpoint=192.168.1.20:7000 | kind=modern_airplay_auth | support=supported | pairing=pin_or_credentials | codecs=l16,alac"
+            "receiver | name=\"Living Room\" | id=living-room | endpoint=192.168.1.20:7000 | profile=modern_auth_raop | support=supported | auth=homekit_transient | pairing=pin_or_credentials | codecs=l16,alac"
         );
     }
 
@@ -236,10 +341,12 @@ mod tests {
             has_stored_credentials: true,
         });
 
-        assert_eq!(
-            line,
-            "receiver | name=\"Living Room\" | id=living-room | endpoint=192.168.1.20:7000 | kind=modern_airplay_auth | support=supported | pairing=pin_or_credentials | codecs=l16,alac | multiroom=yes | stored_credentials=yes"
-        );
+        assert!(line.contains("stored_credentials=yes"));
+        assert!(line.contains("model=\"Mac16,10\""));
+        assert!(line.contains("source_version=940.23.1"));
+        assert!(line.contains("ptp=yes(runtime_path_disabled)"));
+        assert!(line.contains("multiroom=yes(runtime_path_disabled)"));
+        assert!(line.contains("raop_encryption=rsa"));
     }
 
     #[test]

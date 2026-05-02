@@ -3,7 +3,8 @@
 use std::fmt::Write;
 use std::net::UdpSocket;
 
-use super::{AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, SessionDescriptor};
+use crate::audio::{CodecDescription, RAOP_STARTUP_LATENCY_FRAMES};
+use crate::session::{AirPlayError, SessionDescriptor};
 
 /// `RTSP` 请求方法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -514,13 +515,13 @@ mod tests {
         parse_setup_reply,
     };
     use crate::audio::AudioFormat;
+    use crate::audio::{
+        CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
+    };
     use crate::receiver::{
-        AirPlayGeneration, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+        AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
-    use crate::transport::{
-        AirPlayError, CodecDescription, RAOP_STARTUP_LATENCY_FRAMES, RAOP_STARTUP_LATENCY_MILLIS,
-        SessionDescriptor,
-    };
+    use crate::session::{AirPlayError, SessionDescriptor};
 
     fn build_descriptor() -> SessionDescriptor {
         SessionDescriptor::new(
@@ -530,12 +531,13 @@ mod tests {
                 host: String::from("speaker.local"),
                 port: 7000,
                 generation: AirPlayGeneration::AirPlay1,
-                pairing_id: None,
-                receiver_public_key: None,
-                receiver_kind: ReceiverKind::ClassicRaop,
-                support: DeviceSupport::Supported,
+                transport_profile: ReceiverKind::ClassicRaop,
+                support_level: DeviceSupport::Supported,
+                auth_method: AuthMethod::None,
                 capabilities: ReceiverCapabilities::default(),
-            },
+                ..Receiver::default()
+            }
+            .with_compat_fields(),
             AudioFormat::default(),
         )
     }

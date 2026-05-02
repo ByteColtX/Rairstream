@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::pairing::ReceiverCredentials;
-use crate::receiver::ReceiverKind;
+use crate::receiver::TransportProfile;
 
 pub const DEFAULT_SENDER_VOLUME_PERCENT: u16 = 100;
 pub const MAX_SENDER_VOLUME_PERCENT: u16 = 400;
@@ -14,7 +14,11 @@ pub struct CachedReceiver {
     pub name: String,
     pub host: String,
     pub port: u16,
-    pub receiver_kind: ReceiverKind,
+    #[serde(default)]
+    pub transport_profile: TransportProfile,
+    #[doc(hidden)]
+    #[serde(default)]
+    pub receiver_kind: TransportProfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
