@@ -46,6 +46,7 @@ wasapi = "0.23.0"
 
 [build-dependencies]
 ico = "0.5.0"
+num-traits = "0.2.19"
 resvg = "0.45.1"
 winresource = "0.1.31"
 

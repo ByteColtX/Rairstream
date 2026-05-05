@@ -1,3 +1,4 @@
+use num_traits::ToPrimitive;
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -111,8 +112,14 @@ fn render_icon_entry(tree: &resvg::usvg::Tree, size: u32) -> Result<ico::IconDir
         .ok_or_else(|| format!("failed to allocate {size}x{size} pixmap"))?;
 
     let icon_size = tree.size();
-    let scale_x = size as f32 / icon_size.width();
-    let scale_y = size as f32 / icon_size.height();
+    let scale_x = f64::from(size) / f64::from(icon_size.width());
+    let scale_y = f64::from(size) / f64::from(icon_size.height());
+    let scale_x = scale_x
+        .to_f32()
+        .ok_or_else(|| format!("failed to convert horizontal scale {scale_x} to f32"))?;
+    let scale_y = scale_y
+        .to_f32()
+        .ok_or_else(|| format!("failed to convert vertical scale {scale_y} to f32"))?;
     resvg::render(
         tree,
         resvg::tiny_skia::Transform::from_scale(scale_x, scale_y),
