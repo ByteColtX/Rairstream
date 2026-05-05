@@ -44,6 +44,11 @@ x25519-dalek = "2.0.1"
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.23.0"
 
+[build-dependencies]
+ico = "0.5.0"
+resvg = "0.45.1"
+winresource = "0.1.31"
+
 [dev-dependencies]
 
 [lints.clippy]
