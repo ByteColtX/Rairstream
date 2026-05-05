@@ -1,0 +1,59 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="116" y1="114" x2="886" y2="910" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF7F2"/>
+      <stop offset="0.48" stop-color="#E6FBF3"/>
+      <stop offset="1" stop-color="#E0E7FF"/>
+    </linearGradient>
+    <radialGradient id="glowPeach" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(790 232) rotate(146.3) scale(364 292)">
+      <stop offset="0" stop-color="#FFD9C7"/>
+      <stop offset="1" stop-color="#FFD9C7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowLavender" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(260 804) rotate(-25.4) scale(390 322)">
+      <stop offset="0" stop-color="#DACBFF"/>
+      <stop offset="1" stop-color="#DACBFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowSky" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(840 720) rotate(168.8) scale(420 286)">
+      <stop offset="0" stop-color="#CBE8FF"/>
+      <stop offset="1" stop-color="#CBE8FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glowRibbon" x1="224" y1="248" x2="786" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="0.35" stop-color="#FFF7BF" stop-opacity="0.16"/>
+      <stop offset="0.7" stop-color="#FFD5E8" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.22"/>
+    </linearGradient>
+    <filter id="barShadow" x="136" y="244" width="752" height="584" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="14"/>
+      <feGaussianBlur stdDeviation="18"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.690196 0 0 0 0 0.690196 0 0 0 0 0.847059 0 0 0 0.34 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#glowPeach)"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#glowLavender)"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#glowSky)"/>
+  <path d="M184 352C292 216 474 204 622 246C734 278 816 356 844 474C858 538 842 616 790 664C728 722 632 738 536 744C406 752 294 732 224 648C152 562 124 428 184 352Z" fill="url(#glowRibbon)" fill-opacity="0.55"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" stroke="#FFFFFF" stroke-opacity="0.7" stroke-width="2"/>
+
+  <g filter="url(#barShadow)">
+    <rect x="201" y="446" width="28" height="132" rx="14" fill="#FFADC1"/>
+    <rect x="255" y="361" width="28" height="302" rx="14" fill="#FFD1A1"/>
+    <rect x="309" y="424" width="28" height="176" rx="14" fill="#FFF0A0"/>
+    <rect x="363" y="321" width="28" height="382" rx="14" fill="#C7F1AF"/>
+    <rect x="417" y="395" width="28" height="234" rx="14" fill="#A9E5FF"/>
+    <rect x="471" y="285" width="28" height="454" rx="14" fill="#BEC2FF"/>
+    <rect x="525" y="435" width="28" height="154" rx="14" fill="#E3C2FF"/>
+    <rect x="579" y="298" width="28" height="428" rx="14" fill="#AEEFE0"/>
+    <rect x="633" y="369" width="28" height="286" rx="14" fill="#FFC9B4"/>
+    <rect x="687" y="413" width="28" height="198" rx="14" fill="#F8AFD2"/>
+    <rect x="741" y="339" width="28" height="346" rx="14" fill="#B7DEFF"/>
+    <rect x="795" y="439" width="28" height="146" rx="14" fill="#D7F1A8"/>
+  </g>
+</svg>
