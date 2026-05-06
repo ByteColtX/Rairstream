@@ -14,5 +14,6 @@ pub mod receiver;
 pub mod rtsp;
 pub mod session;
 pub mod timing;
+pub mod ui;
 
 mod storage;

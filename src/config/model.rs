@@ -29,6 +29,8 @@ pub struct AppConfig {
     pub paired_receivers: HashMap<String, ReceiverCredentials>,
     #[serde(default)]
     pub receiver_cache: HashMap<String, CachedReceiver>,
+    #[serde(default)]
+    pub tray_selected_receiver_ids: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -37,6 +39,7 @@ impl Default for AppConfig {
             sender_volume_percent: DEFAULT_SENDER_VOLUME_PERCENT,
             paired_receivers: HashMap::new(),
             receiver_cache: HashMap::new(),
+            tray_selected_receiver_ids: Vec::new(),
         }
     }
 }
@@ -61,6 +64,10 @@ impl AppConfig {
 
     pub fn upsert_receiver_cache(&mut self, receiver: CachedReceiver) {
         self.receiver_cache.insert(receiver.id.clone(), receiver);
+    }
+
+    pub fn set_tray_selected_receiver_ids(&mut self, receiver_ids: Vec<String>) {
+        self.tray_selected_receiver_ids = receiver_ids;
     }
 }
 
