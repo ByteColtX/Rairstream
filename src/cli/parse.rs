@@ -4,7 +4,18 @@ use std::path::PathBuf;
 
 use crate::error::RairstreamError;
 
-const CLI_USAGE: &str = "usage: discover | inspect --device <selector> | pair --device <selector> [--pin <PIN>] | paired list | paired forget --device <selector> | play file <path> --device <selector>... | play capture --device <selector>...";
+pub(crate) const CLI_USAGE: &str = "usage: discover | inspect --device <selector> | pair --device <selector> [--pin <PIN>] | paired list | paired forget --device <selector> | play file <path> --device <selector>... | play capture --device <selector>...";
+pub(crate) const CLI_USAGE_HEADER: &str =
+    "rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>";
+pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
+    "discover",
+    "inspect --device <selector>",
+    "pair --device <selector> [--pin <PIN>]",
+    "paired list",
+    "paired forget --device <selector>",
+    "play file <path> --device <selector>...",
+    "play capture --device <selector>...",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {

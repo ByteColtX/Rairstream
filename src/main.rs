@@ -1,22 +1,22 @@
-use rairstream::cli::{parse_cli, run_cli};
+use rairstream::cli::{parse_cli, print_error, print_error_message, run_cli};
 use tracing_subscriber::EnvFilter;
 
 fn main() {
     let cli = match parse_cli(std::env::args().skip(1)) {
         Ok(cli) => cli,
         Err(error) => {
-            eprintln!("{error}");
+            print_error(&error);
             std::process::exit(2);
         }
     };
 
     if let Err(error) = init_logging(cli.log_filter()) {
-        eprintln!("{error}");
+        print_error_message("Startup Error", &error);
         std::process::exit(2);
     }
 
     if let Err(error) = run_cli(cli) {
-        eprintln!("{error}");
+        print_error(&error);
         std::process::exit(1);
     }
 }

@@ -154,6 +154,19 @@ Discover receivers:
 rairstream discover
 ```
 
+Example output:
+
+```text
+╭─ Living Room  ✓ Supported
+│ ID:       living-room
+│ Endpoint: 192.168.1.20:7000
+│ Profile:  Modern Auth RAOP
+│ Auth:     HomeKit transient
+│ Pairing:  PIN or credentials
+│ Codecs:   L16, ALAC
+╰─
+```
+
 Inspect receiver details:
 
 ```bash

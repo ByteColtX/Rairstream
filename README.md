@@ -154,6 +154,19 @@ rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>
 rairstream discover
 ```
 
+示例输出：
+
+```text
+╭─ Living Room  ✓ Supported
+│ ID:       living-room
+│ Endpoint: 192.168.1.20:7000
+│ Profile:  Modern Auth RAOP
+│ Auth:     HomeKit transient
+│ Pairing:  PIN or credentials
+│ Codecs:   L16, ALAC
+╰─
+```
+
 检查设备详情：
 
 ```bash
