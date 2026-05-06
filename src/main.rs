@@ -3,9 +3,9 @@
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-use rairstream::cli::{CliOptions, parse_cli, print_error, print_error_message, run_cli};
 #[cfg(target_os = "windows")]
 use native_dialog::{DialogBuilder, MessageLevel};
+use rairstream::cli::{CliOptions, parse_cli, print_error, print_error_message, run_cli};
 use rairstream::error::RairstreamError;
 use rairstream::ui::tray::run as run_tray;
 use tracing_subscriber::EnvFilter;
@@ -14,6 +14,7 @@ const TRAY_BACKGROUND_ENV: &str = "RAIRSTREAM_TRAY_BACKGROUND";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartupMode {
     TrayBootstrap,
@@ -83,12 +84,12 @@ fn init_logging(directive: &str) -> Result<(), String> {
 
 fn determine_startup_mode(
     args: &[String],
-    tray_background_requested: bool,
+    _tray_background_requested: bool,
 ) -> Result<StartupMode, RairstreamError> {
     #[cfg(target_os = "windows")]
     {
         if args.is_empty() {
-            return Ok(if tray_background_requested {
+            return Ok(if _tray_background_requested {
                 StartupMode::Tray
             } else {
                 StartupMode::TrayBootstrap
