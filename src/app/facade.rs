@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::config::{
@@ -13,7 +14,9 @@ use crate::session::{
 };
 use crate::storage::{paired_devices, receiver_cache};
 
-use super::models::{AppState, InspectResult, PairedReceiverEntry, SessionState};
+use super::models::{
+    AppState, InspectResult, PairedReceiverEntry, SessionState, TrayReceiverEntry,
+};
 
 pub struct AppFacade<D> {
     discovery: D,
@@ -130,6 +133,61 @@ where
             .collect();
         sort_paired_entries(&mut entries);
         entries
+    }
+
+    #[must_use]
+    pub fn tray_receivers(&self) -> Vec<TrayReceiverEntry> {
+        let selected_ids: HashSet<&str> = self
+            .config
+            .tray_selected_receiver_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut receiver_ids: Vec<String> = self.config.receiver_cache.keys().cloned().collect();
+        for receiver_id in self.config.paired_receivers.keys() {
+            if !receiver_ids.iter().any(|id| id == receiver_id) {
+                receiver_ids.push(receiver_id.clone());
+            }
+        }
+
+        let mut entries: Vec<_> = receiver_ids
+            .into_iter()
+            .map(|receiver_id| {
+                let cached = self.config.receiver_cache.get(&receiver_id);
+                TrayReceiverEntry {
+                    receiver_id: receiver_id.clone(),
+                    display_name: cached.map(|receiver| receiver.name.clone()),
+                    host: cached.map_or_else(String::new, |receiver| receiver.host.clone()),
+                    is_paired: self.config.paired_receivers.contains_key(&receiver_id),
+                    is_selected: selected_ids.contains(receiver_id.as_str()),
+                }
+            })
+            .collect();
+        sort_tray_entries(&mut entries);
+        entries
+    }
+
+    pub fn set_tray_selected_receiver_ids(
+        &mut self,
+        receiver_ids: Vec<String>,
+    ) -> Result<(), RairstreamError> {
+        let mut normalized_ids = Vec::with_capacity(receiver_ids.len());
+        for receiver_id in receiver_ids {
+            let receiver_id = receiver_id.trim();
+            if receiver_id.is_empty()
+                || normalized_ids
+                    .iter()
+                    .any(|existing_id: &String| existing_id == receiver_id)
+            {
+                continue;
+            }
+
+            normalized_ids.push(receiver_id.to_string());
+        }
+
+        self.config.set_tray_selected_receiver_ids(normalized_ids);
+        self.persist_config()?;
+        Ok(())
     }
 
     pub fn paired_forget(
@@ -288,6 +346,19 @@ fn sort_receivers(receivers: &mut [Receiver]) {
 }
 
 fn sort_paired_entries(entries: &mut [PairedReceiverEntry]) {
+    entries.sort_by_cached_key(|entry| {
+        (
+            entry
+                .display_name
+                .as_deref()
+                .unwrap_or(&entry.receiver_id)
+                .to_ascii_lowercase(),
+            entry.receiver_id.to_ascii_lowercase(),
+        )
+    });
+}
+
+fn sort_tray_entries(entries: &mut [TrayReceiverEntry]) {
     entries.sort_by_cached_key(|entry| {
         (
             entry
@@ -513,6 +584,75 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid input: receiver `Office` has no saved pairing"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tray_receivers_merge_cached_selected_and_paired_entries() {
+        let path = temp_config_path();
+        let mut config = AppConfig::default();
+        config.set_tray_selected_receiver_ids(vec![String::from("kitchen")]);
+        config.upsert_paired_receiver("office", paired_credentials(ReceiverAuthFlow::Modern));
+        config.upsert_receiver_cache(crate::config::CachedReceiver {
+            id: String::from("kitchen"),
+            name: String::from("Kitchen"),
+            host: String::from("192.168.1.30"),
+            port: 7000,
+            transport_profile: ReceiverKind::ClassicRaop,
+            receiver_kind: ReceiverKind::ClassicRaop,
+        });
+        save_config(&path, &config).unwrap();
+
+        let facade = AppFacade::with_config_path(
+            FixedDiscoveryService {
+                receivers: Vec::new(),
+            },
+            path.clone(),
+        )
+        .unwrap();
+
+        let entries = facade.tray_receivers();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].receiver_id, "kitchen");
+        assert!(entries[0].is_selected);
+        assert!(!entries[0].is_paired);
+        assert_eq!(entries[1].receiver_id, "office");
+        assert!(entries[1].is_paired);
+        assert_eq!(entries[1].host, "");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_tray_selected_receiver_ids_deduplicates_and_persists() {
+        let path = temp_config_path();
+        let mut facade = AppFacade::with_config_path(
+            FixedDiscoveryService {
+                receivers: Vec::new(),
+            },
+            path.clone(),
+        )
+        .unwrap();
+
+        facade
+            .set_tray_selected_receiver_ids(vec![
+                String::from("kitchen"),
+                String::from("kitchen"),
+                String::from(" living-room "),
+                String::from(" "),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            facade.config().tray_selected_receiver_ids,
+            vec![String::from("kitchen"), String::from("living-room")]
+        );
+
+        let reloaded = crate::config::load_config(&path).unwrap();
+        assert_eq!(
+            reloaded.tray_selected_receiver_ids,
+            vec![String::from("kitchen"), String::from("living-room")]
         );
         let _ = std::fs::remove_file(path);
     }

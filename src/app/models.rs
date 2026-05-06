@@ -36,3 +36,12 @@ pub struct PairedReceiverEntry {
     pub display_name: Option<String>,
     pub auth_flow: ReceiverAuthFlow,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayReceiverEntry {
+    pub receiver_id: String,
+    pub display_name: Option<String>,
+    pub host: String,
+    pub is_paired: bool,
+    pub is_selected: bool,
+}
