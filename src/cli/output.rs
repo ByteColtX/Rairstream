@@ -531,6 +531,7 @@ fn format_codecs(codecs: &[CodecKind]) -> String {
             CodecKind::L16 => String::from("L16"),
             CodecKind::Alac => String::from("ALAC"),
             CodecKind::Aac => String::from("AAC"),
+            CodecKind::AacEld => String::from("AAC ELD"),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -641,8 +642,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Theme, format_error, format_inspect, format_paired_removed, format_pairing_pin_requested,
-        format_play_capture_started, format_receiver, format_receivers,
+        Theme, format_codecs, format_error, format_inspect, format_paired_removed,
+        format_pairing_pin_requested, format_play_capture_started, format_receiver,
+        format_receivers,
     };
 
     fn build_receiver() -> Receiver {
@@ -876,5 +878,18 @@ mod tests {
         let rendered = format_receiver(&receiver, plain_theme());
 
         assert!(rendered.contains("⚠ Experimental (Runtime path disabled)"));
+    }
+
+    #[test]
+    fn format_codecs_distinguishes_aac_eld_from_aac() {
+        assert_eq!(
+            format_codecs(&[
+                CodecKind::L16,
+                CodecKind::Alac,
+                CodecKind::Aac,
+                CodecKind::AacEld,
+            ]),
+            "L16, ALAC, AAC, AAC ELD"
+        );
     }
 }

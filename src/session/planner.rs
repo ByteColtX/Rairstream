@@ -41,6 +41,7 @@ pub fn plan_session(receiver: &Receiver, input_format: AudioFormat) -> SessionPl
         CodecKind::L16 => CipherSuite::L16,
         CodecKind::Alac => CipherSuite::Alac,
         CodecKind::Aac => CipherSuite::Aac,
+        CodecKind::AacEld => CipherSuite::AacEld,
     };
 
     SessionPlan {
