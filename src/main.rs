@@ -1,7 +1,11 @@
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 use rairstream::cli::{CliOptions, parse_cli, print_error, print_error_message, run_cli};
+#[cfg(target_os = "windows")]
+use native_dialog::{DialogBuilder, MessageLevel};
 use rairstream::error::RairstreamError;
 use rairstream::ui::tray::run as run_tray;
 use tracing_subscriber::EnvFilter;
@@ -31,17 +35,23 @@ fn main() {
     match startup_mode {
         StartupMode::TrayBootstrap => {
             if let Err(error) = spawn_tray_background() {
+                #[cfg(target_os = "windows")]
+                show_windows_startup_error(&error);
                 print_error_message("Startup Error", &error);
                 std::process::exit(1);
             }
         }
         StartupMode::Tray => {
             if let Err(error) = init_logging("info") {
+                #[cfg(target_os = "windows")]
+                show_windows_startup_error(&error);
                 print_error_message("Startup Error", &error);
                 std::process::exit(2);
             }
 
             if let Err(error) = run_tray() {
+                #[cfg(target_os = "windows")]
+                show_windows_startup_error(&error);
                 print_error_message("Tray Error", &error);
                 std::process::exit(1);
             }
@@ -106,6 +116,16 @@ fn spawn_tray_background() -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn spawn_tray_background() -> Result<(), String> {
     Err(String::from("tray background bootstrap is unsupported"))
+}
+
+#[cfg(target_os = "windows")]
+fn show_windows_startup_error(message: &str) {
+    let _ = DialogBuilder::message()
+        .set_level(MessageLevel::Error)
+        .set_title("Rairstream")
+        .set_text(message)
+        .alert()
+        .show();
 }
 
 #[cfg(test)]
