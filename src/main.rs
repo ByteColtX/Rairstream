@@ -84,12 +84,15 @@ fn init_logging(directive: &str) -> Result<(), String> {
 
 fn determine_startup_mode(
     args: &[String],
-    _tray_background_requested: bool,
+    tray_background_requested: bool,
 ) -> Result<StartupMode, RairstreamError> {
+    #[cfg(not(target_os = "windows"))]
+    let _ = tray_background_requested;
+
     #[cfg(target_os = "windows")]
     {
         if args.is_empty() {
-            return Ok(if _tray_background_requested {
+            return Ok(if tray_background_requested {
                 StartupMode::Tray
             } else {
                 StartupMode::TrayBootstrap
