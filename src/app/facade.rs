@@ -312,6 +312,7 @@ fn cached_receiver_matches(receiver: &CachedReceiver, selector_text: &str) -> bo
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::config::AppConfig;
@@ -334,11 +335,17 @@ mod tests {
     }
 
     fn temp_config_path() -> PathBuf {
+        static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("rairstream-cli-facade-{unique}.json"))
+        let sequence = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "rairstream-cli-facade-{}-{unique}-{sequence}.json",
+            std::process::id()
+        ))
     }
 
     fn build_receiver(id: &str, name: &str, host: &str) -> Receiver {

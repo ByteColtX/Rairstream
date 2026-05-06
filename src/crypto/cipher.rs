@@ -3,5 +3,6 @@ pub enum CipherSuite {
     L16,
     Alac,
     Aac,
+    AacEld,
     FairPlayPlaceholder,
 }

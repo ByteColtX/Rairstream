@@ -615,7 +615,8 @@ fn parse_raop_codecs(value: &str) -> Vec<CodecKind> {
         .filter_map(|codec| match codec {
             0 => Some(CodecKind::L16),
             1 => Some(CodecKind::Alac),
-            2 | 3 => Some(CodecKind::Aac),
+            2 => Some(CodecKind::Aac),
+            3 => Some(CodecKind::AacEld),
             _ => None,
         })
         .collect()
@@ -639,8 +640,8 @@ mod tests {
 
     use super::{MdnsServiceKind, ResolvedMdnsService, parse_boolish, parse_resolved_services};
     use crate::receiver::{
-        AuthMethod, Features, PairingRequirement, SupportLevel, SupportReason, TransportProfile,
-        Version,
+        AuthMethod, CodecKind, Features, PairingRequirement, SupportLevel, SupportReason,
+        TransportProfile, Version,
     };
 
     fn service(
@@ -792,6 +793,29 @@ mod tests {
                 reason: SupportReason::FairPlayUnsupported
             }
         ));
+    }
+
+    #[test]
+    fn parses_aac_eld_raop_codec_separately_from_aac() {
+        let receivers = parse_resolved_services(&[service(
+            MdnsServiceKind::Raop,
+            "AABBCCDDEEFF@Test Device._raop._tcp.local.",
+            [192, 168, 1, 42],
+            7000,
+            &[("cn", "0,1,2,3")],
+        )]);
+
+        assert_eq!(receivers.len(), 1);
+        assert_eq!(
+            receivers[0].raop.codecs,
+            vec![
+                CodecKind::L16,
+                CodecKind::Alac,
+                CodecKind::Aac,
+                CodecKind::AacEld,
+            ]
+        );
+        assert_eq!(receivers[0].capabilities.codecs, receivers[0].raop.codecs);
     }
 
     #[test]

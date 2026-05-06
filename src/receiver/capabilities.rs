@@ -6,6 +6,7 @@ pub enum CodecKind {
     L16,
     Alac,
     Aac,
+    AacEld,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
