@@ -1,4 +1,6 @@
 use std::io::{self, Write};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
 
 use crate::app::AppFacade;
 use crate::discovery::MdnsDiscoveryService;
@@ -10,6 +12,13 @@ use super::output::{
     print_play_file_completed, print_receivers,
 };
 use super::parse::{CliCommand, CliOptions};
+
+const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+enum CaptureExit {
+    UserRequestedStop,
+    PlaybackFailed(RairstreamError),
+}
 
 pub fn run_cli(cli: CliOptions) -> Result<(), RairstreamError> {
     let mut facade = AppFacade::new(MdnsDiscoveryService::default())?;
@@ -55,10 +64,16 @@ pub fn run_cli(cli: CliOptions) -> Result<(), RairstreamError> {
         CliCommand::PlayCapture { selectors } => {
             let session = facade.play_capture(&selectors)?;
             print_play_capture_started(&selectors);
-            wait_for_ctrl_c()?;
-            facade.stop_capture(session)?;
-            print_play_capture_stopped(&selectors);
-            Ok(())
+            match wait_for_ctrl_c_or_capture_end(&session)? {
+                CaptureExit::UserRequestedStop => {
+                    facade.stop_capture(session)?;
+                    print_play_capture_stopped(&selectors);
+                    Ok(())
+                }
+                CaptureExit::PlaybackFailed(error) => {
+                    stop_capture_after_failure(&mut facade, session, error)
+                }
+            }
         }
     }
 }
@@ -77,12 +92,39 @@ fn prompt_pairing_pin(receiver_name: &str) -> Result<String, RairstreamError> {
     Ok(pin.to_string())
 }
 
-fn wait_for_ctrl_c() -> Result<(), RairstreamError> {
-    let (sender, receiver) = std::sync::mpsc::channel();
+fn wait_for_ctrl_c_or_capture_end(
+    session: &crate::session::PlaybackSession,
+) -> Result<CaptureExit, RairstreamError> {
+    let (sender, receiver) = mpsc::channel();
     ctrlc::set_handler(move || {
         let _ = sender.send(());
     })
     .map_err(std::io::Error::other)?;
-    receiver.recv().map_err(std::io::Error::other)?;
-    Ok(())
+
+    loop {
+        match receiver.recv_timeout(PLAYBACK_POLL_INTERVAL) {
+            Ok(()) => return Ok(CaptureExit::UserRequestedStop),
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(error) = session.transport_error() {
+                    return Ok(CaptureExit::PlaybackFailed(error));
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(std::io::Error::other("control-c listener disconnected").into());
+            }
+        }
+    }
+}
+
+fn stop_capture_after_failure(
+    facade: &mut AppFacade<MdnsDiscoveryService>,
+    session: crate::session::PlaybackSession,
+    error: RairstreamError,
+) -> Result<(), RairstreamError> {
+    match facade.stop_capture(session) {
+        Ok(()) => Err(error),
+        Err(stop_error) => Err(RairstreamError::Playback {
+            message: format!("{error}; cleanup failed: {stop_error}"),
+        }),
+    }
 }

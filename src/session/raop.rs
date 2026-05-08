@@ -1,10 +1,7 @@
 //! classic `RAOP` 会话、握手与连接生命周期实现。
 
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{AirPlayError, SessionDescriptor};
@@ -39,7 +36,7 @@ pub struct RaopConnection {
     control_target: SocketAddr,
     timing_responder: Option<TimingResponder>,
     rtsp_keepalive: Option<SharedRtspKeepalive>,
-    transport_terminated: Arc<AtomicBool>,
+    transport_error: Arc<Mutex<Option<AirPlayError>>>,
 }
 
 impl RaopConnection {
@@ -76,7 +73,15 @@ impl RaopConnection {
 
     #[must_use]
     pub fn is_terminated(&self) -> bool {
-        self.transport_terminated.load(Ordering::SeqCst)
+        self.transport_error().is_some()
+    }
+
+    #[must_use]
+    pub fn transport_error(&self) -> Option<AirPlayError> {
+        self.transport_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn stop_timing_responder(&mut self) {
@@ -281,14 +286,14 @@ impl RaopSession {
         self.apply_record_response(&record_response)?;
 
         let keepalive_interval = compute_rtsp_keepalive_interval(setup_reply.session_timeout_secs);
-        let transport_terminated = Arc::new(AtomicBool::new(false));
+        let transport_error = Arc::new(Mutex::new(None));
         let rtsp_keepalive = SharedRtspKeepalive::start(
             rtsp_client,
             self.descriptor.clone(),
             setup_reply.session_id.clone(),
             self.cseq,
             keepalive_interval,
-            Arc::clone(&transport_terminated),
+            Arc::clone(&transport_error),
         )?;
         let audio_target =
             resolve_socket_addr(&self.descriptor.device.host, setup_reply.server_port)?;
@@ -306,7 +311,7 @@ impl RaopSession {
             control_target,
             timing_responder: Some(timing_responder),
             rtsp_keepalive: Some(rtsp_keepalive),
-            transport_terminated,
+            transport_error,
         })
     }
 
