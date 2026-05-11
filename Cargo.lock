@@ -2393,6 +2393,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "wasapi",
+ "windows-sys 0.61.2",
  "winit",
  "winresource",
  "x25519-dalek",
