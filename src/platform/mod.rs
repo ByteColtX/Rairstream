@@ -4,6 +4,9 @@ mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "windows")]
+pub use windows::{is_start_at_login_enabled, set_start_at_login_enabled};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformInfo {
     pub os: &'static str,
