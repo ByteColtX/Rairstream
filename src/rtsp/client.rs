@@ -1,10 +1,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -135,7 +132,7 @@ struct RtspKeepaliveWorker {
     cseq: u32,
     interval: Duration,
     command_rx: Receiver<RtspKeepaliveCommand>,
-    transport_terminated: Arc<AtomicBool>,
+    transport_error: Arc<Mutex<Option<AirPlayError>>>,
 }
 
 impl RtspKeepalive {
@@ -145,7 +142,7 @@ impl RtspKeepalive {
         session_id: String,
         initial_cseq: u32,
         interval: Duration,
-        transport_terminated: Arc<AtomicBool>,
+        transport_error: Arc<Mutex<Option<AirPlayError>>>,
     ) -> Result<Self, AirPlayError> {
         let endpoint = descriptor.device.endpoint();
         let (command_tx, command_rx) = mpsc::channel();
@@ -159,7 +156,7 @@ impl RtspKeepalive {
                     cseq: initial_cseq,
                     interval,
                     command_rx,
-                    transport_terminated,
+                    transport_error,
                 }
                 .run();
             })
@@ -214,6 +211,16 @@ impl RtspKeepalive {
 }
 
 impl RtspKeepaliveWorker {
+    fn record_transport_error(&self, error: AirPlayError) {
+        let mut state = self
+            .transport_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.is_none() {
+            *state = Some(error);
+        }
+    }
+
     fn run(mut self) {
         let endpoint = self.descriptor.device.endpoint();
 
@@ -249,7 +256,7 @@ impl RtspKeepaliveWorker {
                                     error = %error,
                                     "RTSP keepalive received failure response"
                                 );
-                                self.transport_terminated.store(true, Ordering::SeqCst);
+                                self.record_transport_error(error);
                                 break;
                             }
                             trace!(
@@ -266,7 +273,7 @@ impl RtspKeepaliveWorker {
                                 error = %error,
                                 "RTSP keepalive failed"
                             );
-                            self.transport_terminated.store(true, Ordering::SeqCst);
+                            self.record_transport_error(error);
                             break;
                         }
                     }
@@ -329,7 +336,7 @@ pub(crate) fn map_connection_error(error: std::io::Error) -> AirPlayError {
 mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::{Arc, atomic::AtomicBool, mpsc};
+    use std::sync::{Arc, Mutex, mpsc};
     use std::thread;
     use std::time::Duration;
 
@@ -419,7 +426,7 @@ mod tests {
             String::from("deadbeef"),
             0,
             Duration::from_secs(1),
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(None)),
         )
         .unwrap();
 

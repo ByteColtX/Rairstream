@@ -18,6 +18,14 @@ pub struct PlaybackSession {
 }
 
 impl PlaybackSession {
+    #[must_use]
+    pub fn transport_error(&self) -> Option<RairstreamError> {
+        self.connections
+            .iter()
+            .find_map(|connection| connection.connection.transport_error())
+            .map(Into::into)
+    }
+
     pub fn stop(mut self) -> Result<(), RairstreamError> {
         let capture_result = match self.capture.take() {
             Some(capture) => capture.stop().map_err(Into::into),
@@ -200,13 +208,24 @@ fn teardown_connections(connections: Vec<ConnectedReceiver>) -> Result<(), Rairs
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::time::Instant;
+    use std::collections::{HashMap, VecDeque};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use crate::audio::{AudioCaptureError, AudioChunk, AudioFormat, AudioSink};
     use crate::error::RairstreamError;
+    use crate::pairing::ReceiverCredentials;
+    use crate::receiver::{
+        AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
+    };
+    use crate::session::AirPlayError;
 
-    use super::{chunk_duration, combine_playback_results, stream_chunks};
+    use super::{
+        PlaybackSession, chunk_duration, combine_playback_results, connect_receivers, stream_chunks,
+    };
 
     #[derive(Debug, Default)]
     struct RecordingSink {
@@ -295,5 +314,133 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, AudioCaptureError::InvalidFormat { .. }));
+    }
+
+    #[test]
+    fn playback_session_reports_keepalive_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let port_listener = listener.try_clone().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let (mut stream, _) = port_listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+            for response in [
+                "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n",
+                "RTSP/1.0 200 OK\r\nCSeq: 2\r\n\r\n",
+                "RTSP/1.0 200 OK\r\nTransport: RTP/AVP/UDP;unicast;mode=record;server_port=5100;control_port=5101;timing_port=5102\r\nSession: deadbeef;timeout=1\r\n\r\n",
+                "RTSP/1.0 200 OK\r\nSession: deadbeef\r\n\r\n",
+            ] {
+                let _request = read_rtsp_message(&mut reader).unwrap();
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+
+            let keepalive_request = read_rtsp_message(&mut reader).unwrap();
+            assert!(keepalive_request.starts_with("OPTIONS *"));
+            stream
+                .write_all(b"RTSP/1.0 500 Server Error\r\nSession: deadbeef\r\n\r\n")
+                .unwrap();
+            stream.flush().unwrap();
+            tx.send(()).unwrap();
+        });
+
+        let paired_receivers: HashMap<String, ReceiverCredentials> = HashMap::new();
+        let connections = connect_receivers(
+            &[build_receiver(port)],
+            AudioFormat::default(),
+            &paired_receivers,
+            100,
+        )
+        .unwrap();
+        let session = PlaybackSession {
+            connections,
+            capture: None,
+        };
+
+        rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let error = wait_for_transport_error(&session).unwrap();
+
+        assert!(matches!(
+            error,
+            RairstreamError::Session(AirPlayError::Protocol { message })
+                if message == "RTSP keepalive returned failure status 500"
+        ));
+
+        session.stop().unwrap();
+    }
+
+    fn build_receiver(port: u16) -> Receiver {
+        Receiver {
+            id: String::from("speaker"),
+            name: String::from("Speaker"),
+            host: String::from("127.0.0.1"),
+            port,
+            generation: AirPlayGeneration::AirPlay1,
+            transport_profile: ReceiverKind::ClassicRaop,
+            support_level: DeviceSupport::Supported,
+            auth_method: AuthMethod::None,
+            capabilities: ReceiverCapabilities::default(),
+            ..Receiver::default()
+        }
+        .with_compat_fields()
+    }
+
+    fn read_rtsp_message(reader: &mut BufReader<TcpStream>) -> Result<String, std::io::Error> {
+        let raw = read_rtsp_message_bytes(reader)?;
+        Ok(String::from_utf8_lossy(&raw).into_owned())
+    }
+
+    fn read_rtsp_message_bytes(
+        reader: &mut BufReader<TcpStream>,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        let mut raw = Vec::new();
+        let mut content_length = 0_usize;
+
+        loop {
+            let mut line = String::new();
+            let bytes_read = reader.read_line(&mut line)?;
+            if bytes_read == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "connection closed",
+                ));
+            }
+
+            let normalized = line.trim_end_matches(['\r', '\n']);
+            raw.extend_from_slice(normalized.as_bytes());
+            raw.extend_from_slice(b"\r\n");
+
+            if normalized.is_empty() {
+                break;
+            }
+
+            if let Some((name, value)) = normalized.split_once(':')
+                && name.trim().eq_ignore_ascii_case("Content-Length")
+            {
+                content_length = value.trim().parse::<usize>().unwrap();
+            }
+        }
+
+        if content_length > 0 {
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body)?;
+            raw.extend_from_slice(&body);
+        }
+
+        Ok(raw)
+    }
+
+    fn wait_for_transport_error(session: &PlaybackSession) -> Option<RairstreamError> {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2) {
+            if let Some(error) = session.transport_error() {
+                return Some(error);
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        None
     }
 }

@@ -83,6 +83,14 @@ impl SessionConnection {
     }
 
     #[must_use]
+    pub fn transport_error(&self) -> Option<AirPlayError> {
+        match self {
+            Self::ClassicRaop(connection) => connection.transport_error(),
+            Self::ModernAirPlay(connection) => connection.transport_error(),
+        }
+    }
+
+    #[must_use]
     pub fn is_terminated(&self) -> bool {
         match self {
             Self::ClassicRaop(connection) => connection.is_terminated(),
@@ -186,6 +194,11 @@ impl ModernAirPlayConnection {
 
     pub fn stream_transport(&self) -> Result<crate::transport::RaopStreamTransport, AirPlayError> {
         self.raop_connection.stream_transport()
+    }
+
+    #[must_use]
+    pub fn transport_error(&self) -> Option<AirPlayError> {
+        self.raop_connection.transport_error()
     }
 
     #[must_use]
