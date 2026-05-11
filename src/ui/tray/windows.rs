@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
+use std::time::Duration;
 
 use native_dialog::{DialogBuilder, MessageLevel};
 use tray_icon::menu::{
@@ -21,6 +22,7 @@ use super::{TrayCommand, TrayEvent, TrayPhase, TraySnapshot, TrayWorker, tray_re
 
 const APP_TITLE: &str = "Rairstream";
 const POWERSHELL_CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 const MENU_ID_REFRESH: &str = "refresh";
 const MENU_ID_START_STREAMING: &str = "start-streaming";
@@ -435,17 +437,35 @@ fn spawn_worker(proxy: EventLoopProxy<UserEvent>) -> Result<Sender<TrayCommand>,
                 worker.snapshot(),
             )));
 
-            while let Ok(command) = command_receiver.recv() {
-                let events = worker.handle_command(command);
-                let should_exit = events
-                    .iter()
-                    .any(|event| matches!(event, TrayEvent::ExitRequested));
-                for event in events {
-                    let _ = proxy.send_event(UserEvent::Worker(event));
-                }
+            loop {
+                match command_receiver.recv_timeout(PLAYBACK_POLL_INTERVAL) {
+                    Ok(command) => {
+                        let events = worker.handle_command(command);
+                        let should_exit = events
+                            .iter()
+                            .any(|event| matches!(event, TrayEvent::ExitRequested));
+                        for event in events {
+                            let _ = proxy.send_event(UserEvent::Worker(event));
+                        }
 
-                if should_exit {
-                    break;
+                        if should_exit {
+                            break;
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        let events = worker.poll();
+                        let should_exit = events
+                            .iter()
+                            .any(|event| matches!(event, TrayEvent::ExitRequested));
+                        for event in events {
+                            let _ = proxy.send_event(UserEvent::Worker(event));
+                        }
+
+                        if should_exit {
+                            break;
+                        }
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
             }
         })

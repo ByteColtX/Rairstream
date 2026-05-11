@@ -162,6 +162,18 @@ where
         }
     }
 
+    pub fn poll(&mut self) -> Vec<TrayEvent> {
+        let Some(error) = self
+            .active_session
+            .as_ref()
+            .and_then(PlaybackSession::transport_error)
+        else {
+            return Vec::new();
+        };
+
+        self.stop_active_session_with_error(error)
+    }
+
     fn refresh_devices(&mut self) -> Vec<TrayEvent> {
         let mut events = Vec::new();
         if let Err(error) = self.facade.discover() {
@@ -276,6 +288,26 @@ where
         let should_exit = self.runtime.stop_streaming();
         events.push(self.snapshot_event());
         if exit_after_stop || should_exit {
+            events.push(TrayEvent::ExitRequested);
+        }
+        events
+    }
+
+    fn stop_active_session_with_error(&mut self, error: RairstreamError) -> Vec<TrayEvent> {
+        let error = if let Some(session) = self.active_session.take() {
+            match self.facade.stop_capture(session) {
+                Ok(()) => error,
+                Err(stop_error) => RairstreamError::Playback {
+                    message: format!("{error}; cleanup failed: {stop_error}"),
+                },
+            }
+        } else {
+            error
+        };
+
+        let should_exit = self.runtime.stop_streaming();
+        let mut events = vec![TrayEvent::Error(error.to_string()), self.snapshot_event()];
+        if should_exit {
             events.push(TrayEvent::ExitRequested);
         }
         events
