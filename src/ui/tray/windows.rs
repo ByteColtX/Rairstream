@@ -15,6 +15,7 @@ use winit::window::WindowId;
 
 use crate::app::AppFacade;
 use crate::discovery::MdnsDiscoveryService;
+use crate::platform;
 
 use super::{TrayCommand, TrayEvent, TrayPhase, TraySnapshot, TrayWorker, tray_receiver_label};
 
@@ -24,6 +25,7 @@ const POWERSHELL_CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MENU_ID_REFRESH: &str = "refresh";
 const MENU_ID_START_STREAMING: &str = "start-streaming";
 const MENU_ID_STOP_STREAMING: &str = "stop-streaming";
+const MENU_ID_START_AT_LOGIN: &str = "start-at-login";
 const MENU_ID_QUIT: &str = "quit";
 const MENU_ID_TARGET_PREFIX: &str = "target:";
 const MENU_ID_PAIR_PREFIX: &str = "pair:";
@@ -40,6 +42,7 @@ enum MenuAction {
     Refresh,
     StartStreaming,
     StopStreaming,
+    ToggleStartAtLogin,
     Quit,
     ToggleReceiver { receiver_id: String },
     RequestPairing { receiver_id: String },
@@ -115,6 +118,16 @@ impl TrayApp {
             MenuAction::Refresh => TrayCommand::RefreshDevices,
             MenuAction::StartStreaming => TrayCommand::StartStreaming,
             MenuAction::StopStreaming => TrayCommand::StopStreaming,
+            MenuAction::ToggleStartAtLogin => {
+                if let Some(menu) = self.menu.as_ref() {
+                    let enabled = menu.start_at_login.is_checked();
+                    if let Err(error) = platform::set_start_at_login_enabled(enabled) {
+                        menu.start_at_login.set_checked(!enabled);
+                        show_alert(MessageLevel::Error, &error);
+                    }
+                }
+                return;
+            }
             MenuAction::Quit => TrayCommand::Quit,
             MenuAction::ToggleReceiver { receiver_id } => {
                 let Some(selected) = menu.checked_state(&receiver_id) else {
@@ -228,6 +241,7 @@ struct TrayMenu {
     forget_pairing: Submenu,
     start_streaming: MenuItem,
     stop_streaming: MenuItem,
+    start_at_login: CheckMenuItem,
     quit: MenuItem,
     target_items: HashMap<String, CheckMenuItem>,
 }
@@ -244,11 +258,19 @@ impl TrayMenu {
             MenuItem::with_id(MENU_ID_START_STREAMING, "Start Streaming", false, None);
         let stop_streaming =
             MenuItem::with_id(MENU_ID_STOP_STREAMING, "Stop Streaming", false, None);
+        let start_at_login = CheckMenuItem::with_id(
+            MENU_ID_START_AT_LOGIN,
+            "Start at login",
+            true,
+            platform::is_start_at_login_enabled().unwrap_or(false),
+            None,
+        );
         let quit = MenuItem::with_id(MENU_ID_QUIT, "Quit", true, None);
 
         let separator_a = PredefinedMenuItem::separator();
         let separator_b = PredefinedMenuItem::separator();
         let separator_c = PredefinedMenuItem::separator();
+        let separator_d = PredefinedMenuItem::separator();
         root.append_items(&[
             &status,
             &separator_a,
@@ -260,6 +282,8 @@ impl TrayMenu {
             &start_streaming,
             &stop_streaming,
             &separator_c,
+            &start_at_login,
+            &separator_d,
             &quit,
         ])
         .map_err(|error| format!("failed to build tray menu: {error}"))?;
@@ -273,6 +297,7 @@ impl TrayMenu {
             forget_pairing,
             start_streaming,
             stop_streaming,
+            start_at_login,
             quit,
             target_items: HashMap::new(),
         };
@@ -296,6 +321,7 @@ impl TrayMenu {
         self.start_streaming
             .set_enabled(!is_streaming && !is_waiting_for_pin && has_selected_targets);
         self.stop_streaming.set_enabled(is_streaming);
+        self.start_at_login.set_enabled(true);
         self.quit.set_enabled(true);
         Ok(())
     }
@@ -530,6 +556,9 @@ fn parse_menu_action(menu_id: &MenuId) -> Option<MenuAction> {
     if menu_id == MENU_ID_STOP_STREAMING {
         return Some(MenuAction::StopStreaming);
     }
+    if menu_id == MENU_ID_START_AT_LOGIN {
+        return Some(MenuAction::ToggleStartAtLogin);
+    }
     if menu_id == MENU_ID_QUIT {
         return Some(MenuAction::Quit);
     }
@@ -571,6 +600,10 @@ mod tests {
         assert_eq!(
             parse_menu_action(&MenuId::new("quit")),
             Some(MenuAction::Quit)
+        );
+        assert_eq!(
+            parse_menu_action(&MenuId::new("start-at-login")),
+            Some(MenuAction::ToggleStartAtLogin)
         );
     }
 
