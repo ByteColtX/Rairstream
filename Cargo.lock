@@ -2394,6 +2394,7 @@ dependencies = [
  "tray-icon",
  "wasapi",
  "windows-registry",
+ "windows-sys 0.61.2",
  "winit",
  "winresource",
  "x25519-dalek",

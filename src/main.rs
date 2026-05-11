@@ -24,6 +24,11 @@ enum StartupMode {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "windows")]
+    if !args.is_empty() {
+        attach_parent_console_for_cli();
+    }
+
     let startup_mode =
         match determine_startup_mode(&args, std::env::var_os(TRAY_BACKGROUND_ENV).is_some()) {
             Ok(mode) => mode,
@@ -117,6 +122,98 @@ fn spawn_tray_background() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+fn attach_parent_console_for_cli() {
+    use std::ptr::null;
+    use windows_sys::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE,
+        INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+        STD_OUTPUT_HANDLE, SetStdHandle,
+    };
+
+    fn is_invalid_handle(handle: HANDLE) -> bool {
+        handle.is_null() || handle == INVALID_HANDLE_VALUE
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    #[allow(unsafe_code)]
+    // SAFETY: These calls only attach this Windows GUI-subsystem process to the
+    // parent's console and replace missing standard handles with CONIN$/CONOUT$.
+    // Existing valid handles are preserved so shell redirection keeps working.
+    unsafe {
+        let stdout_missing = is_invalid_handle(GetStdHandle(STD_OUTPUT_HANDLE));
+        let stderr_missing = is_invalid_handle(GetStdHandle(STD_ERROR_HANDLE));
+        let stdin_missing = is_invalid_handle(GetStdHandle(STD_INPUT_HANDLE));
+        if !stdout_missing && !stderr_missing && !stdin_missing {
+            return;
+        }
+
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 && GetLastError() != ERROR_ACCESS_DENIED {
+            return;
+        }
+
+        if stdout_missing {
+            let output = CreateFileW(
+                wide("CONOUT$").as_ptr(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                null_mut_handle(),
+            );
+            if !is_invalid_handle(output) {
+                let _ = SetStdHandle(STD_OUTPUT_HANDLE, output);
+            }
+        }
+
+        if stderr_missing {
+            let output = CreateFileW(
+                wide("CONOUT$").as_ptr(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                null_mut_handle(),
+            );
+            if !is_invalid_handle(output) {
+                let _ = SetStdHandle(STD_ERROR_HANDLE, output);
+            }
+        }
+
+        if stdin_missing {
+            let input = CreateFileW(
+                wide("CONIN$").as_ptr(),
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                null_mut_handle(),
+            );
+            if !is_invalid_handle(input) {
+                let _ = SetStdHandle(STD_INPUT_HANDLE, input);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+const fn null_mut_handle() -> windows_sys::Win32::Foundation::HANDLE {
+    std::ptr::null_mut()
+}
+
 #[cfg(not(target_os = "windows"))]
 fn spawn_tray_background() -> Result<(), String> {
     Err(String::from("tray background bootstrap is unsupported"))
@@ -161,6 +258,16 @@ mod tests {
         assert!(matches!(
             mode,
             StartupMode::Cli(cli) if cli.command == CliCommand::Discover
+        ));
+    }
+
+    #[test]
+    fn help_arguments_parse_through_cli_mode() {
+        let mode = determine_startup_mode(&[String::from("--help")], false).unwrap();
+
+        assert!(matches!(
+            mode,
+            StartupMode::Cli(cli) if cli.command == CliCommand::Help
         ));
     }
 }

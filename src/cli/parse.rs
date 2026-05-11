@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 use crate::error::RairstreamError;
 
-pub(crate) const CLI_USAGE: &str = "usage: discover | inspect --device <selector> | pair --device <selector> [--pin <PIN>] | paired list | paired forget --device <selector> | play file <path> --device <selector>... | play capture --device <selector>...";
+pub(crate) const CLI_USAGE: &str =
+    "usage: rairstream [-h|--help] [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>";
 pub(crate) const CLI_USAGE_HEADER: &str =
-    "rairstream [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>";
+    "rairstream [-h|--help] [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>";
 pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
     "discover",
     "inspect --device <selector>",
@@ -19,6 +20,7 @@ pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
+    Help,
     Discover,
     Inspect {
         selector: String,
@@ -63,9 +65,11 @@ pub fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<CliOptions, R
     let mut verbosity = 0_u8;
     let mut log_level = None;
     let mut positionals = Vec::new();
+    let mut help_requested = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "-h" | "--help" => help_requested = true,
             "-v" | "--verbose" => verbosity = verbosity.saturating_add(1),
             "-vv" => verbosity = verbosity.saturating_add(2),
             "--log-level" => {
@@ -83,7 +87,17 @@ pub fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<CliOptions, R
         }
     }
 
-    let command = parse_command(&positionals)?;
+    let command = if help_requested {
+        if positionals.is_empty() {
+            CliCommand::Help
+        } else {
+            return Err(RairstreamError::InvalidCli {
+                message: String::from("-h/--help cannot be combined with a command"),
+            });
+        }
+    } else {
+        parse_command(&positionals)?
+    };
     Ok(CliOptions {
         command,
         log_level,
@@ -259,6 +273,30 @@ fn missing_value_error(flag: &str) -> RairstreamError {
 #[cfg(test)]
 mod tests {
     use super::{CliCommand, parse_cli};
+
+    #[test]
+    fn parse_help_short_flag() {
+        let cli = parse_cli([String::from("-h")]).unwrap();
+
+        assert_eq!(cli.command, CliCommand::Help);
+    }
+
+    #[test]
+    fn parse_help_long_flag() {
+        let cli = parse_cli([String::from("--help")]).unwrap();
+
+        assert_eq!(cli.command, CliCommand::Help);
+    }
+
+    #[test]
+    fn parse_help_rejects_command_combination() {
+        let error = parse_cli([String::from("--help"), String::from("discover")]).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid command line: -h/--help cannot be combined with a command"
+        );
+    }
 
     #[test]
     fn parse_play_capture_requires_device() {

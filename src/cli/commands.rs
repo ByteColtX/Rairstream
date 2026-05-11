@@ -5,16 +5,22 @@ use crate::discovery::MdnsDiscoveryService;
 use crate::error::RairstreamError;
 
 use super::output::{
-    print_inspect, print_paired_list, print_paired_removed, print_paired_saved,
+    print_help, print_inspect, print_paired_list, print_paired_removed, print_paired_saved,
     print_pairing_pin_requested, print_play_capture_started, print_play_capture_stopped,
     print_play_file_completed, print_receivers,
 };
 use super::parse::{CliCommand, CliOptions};
 
 pub fn run_cli(cli: CliOptions) -> Result<(), RairstreamError> {
+    if cli.command == CliCommand::Help {
+        print_help();
+        return Ok(());
+    }
+
     let mut facade = AppFacade::new(MdnsDiscoveryService::default())?;
 
     match cli.command {
+        CliCommand::Help => unreachable!("help exits before app initialization"),
         CliCommand::Discover => {
             let receivers = facade.discover()?;
             print_receivers(&receivers);

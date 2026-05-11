@@ -57,6 +57,10 @@ pub fn print_play_capture_stopped(selectors: &[String]) {
     write_stdout(&format_play_capture_stopped(selectors, Theme::stdout()));
 }
 
+pub fn print_help() {
+    write_stdout(&format_help(Theme::stdout()));
+}
+
 pub fn print_error(error: &RairstreamError) {
     write_stderr(&format_error(error, Theme::stderr()));
 }
@@ -319,6 +323,27 @@ fn format_play_capture_stopped(selectors: &[String], theme: Theme) -> String {
         "Capture Stopped",
         render_list("Devices", selectors),
     )
+}
+
+fn format_help(theme: Theme) -> String {
+    let mut lines = Vec::new();
+    lines.push(theme.section_title("Usage"));
+    lines.push(format!("  {CLI_USAGE_HEADER}"));
+    lines.push(String::new());
+    lines.push(theme.section_title("Commands"));
+    lines.extend(CLI_COMMAND_USAGE.iter().map(|line| format!("  {line}")));
+    lines.push(String::new());
+    lines.push(theme.section_title("Options"));
+    lines.push(String::from("  -h, --help        Show this help text"));
+    lines.push(String::from("  -v, --verbose     Increase log verbosity"));
+    lines.push(String::from(
+        "  -vv               Enable trace-level verbosity",
+    ));
+    lines.push(String::from(
+        "  --log-level <level>  Set error, warn, info, debug, or trace logging",
+    ));
+
+    render_card(&theme.title("Rairstream CLI"), lines)
 }
 
 fn format_receiver(receiver: &Receiver, theme: Theme) -> String {
@@ -642,7 +667,7 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Theme, format_codecs, format_error, format_inspect, format_paired_removed,
+        Theme, format_codecs, format_error, format_help, format_inspect, format_paired_removed,
         format_pairing_pin_requested, format_play_capture_started, format_receiver,
         format_receivers,
     };
@@ -815,6 +840,19 @@ mod tests {
         assert!(rendered.contains("Usage"));
         assert!(rendered.contains("Commands"));
         assert!(rendered.contains("inspect --device <selector>"));
+    }
+
+    #[test]
+    fn format_help_includes_usage_commands_and_options() {
+        let rendered = format_help(plain_theme());
+
+        assert!(rendered.contains("Rairstream CLI"));
+        assert!(!rendered.contains("ℹ Rairstream CLI"));
+        assert!(rendered.contains("Usage"));
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("Options"));
+        assert!(rendered.contains("-h, --help"));
+        assert!(rendered.contains("play capture --device <selector>..."));
     }
 
     #[test]

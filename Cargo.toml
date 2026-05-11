@@ -46,6 +46,7 @@ native-dialog = "0.9.6"
 tray-icon = { version = "0.23.1", default-features = false }
 wasapi = "0.23.0"
 windows-registry = "0.6.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
 winit = { version = "0.30.12", default-features = false }
 
 [build-dependencies]
@@ -64,4 +65,4 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
