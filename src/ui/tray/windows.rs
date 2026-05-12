@@ -15,9 +15,11 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::WindowId;
 
 use crate::app::AppFacade;
+use crate::config::TrayLanguagePreference;
 use crate::discovery::MdnsDiscoveryService;
 use crate::platform;
 
+use super::i18n::{TrayI18n, TrayText};
 use super::{TrayCommand, TrayEvent, TrayPhase, TraySnapshot, TrayWorker, tray_receiver_label};
 
 const APP_TITLE: &str = "Rairstream";
@@ -28,6 +30,9 @@ const MENU_ID_REFRESH: &str = "refresh";
 const MENU_ID_START_STREAMING: &str = "start-streaming";
 const MENU_ID_STOP_STREAMING: &str = "stop-streaming";
 const MENU_ID_START_AT_LOGIN: &str = "start-at-login";
+const MENU_ID_LANGUAGE_SYSTEM: &str = "language:system";
+const MENU_ID_LANGUAGE_EN_US: &str = "language:en-us";
+const MENU_ID_LANGUAGE_ZH_CN: &str = "language:zh-cn";
 const MENU_ID_QUIT: &str = "quit";
 const MENU_ID_TARGET_PREFIX: &str = "target:";
 const MENU_ID_PAIR_PREFIX: &str = "pair:";
@@ -45,6 +50,7 @@ enum MenuAction {
     StartStreaming,
     StopStreaming,
     ToggleStartAtLogin,
+    SetLanguage(TrayLanguagePreference),
     Quit,
     ToggleReceiver { receiver_id: String },
     RequestPairing { receiver_id: String },
@@ -130,6 +136,7 @@ impl TrayApp {
                 }
                 return;
             }
+            MenuAction::SetLanguage(language) => TrayCommand::SetLanguage { language },
             MenuAction::Quit => TrayCommand::Quit,
             MenuAction::ToggleReceiver { receiver_id } => {
                 let Some(selected) = menu.checked_state(&receiver_id) else {
@@ -163,26 +170,33 @@ impl TrayApp {
             TrayEvent::PromptForPin {
                 receiver_id,
                 display_name,
-            } => match prompt_for_pin(&display_name) {
-                Ok(Some(pin)) => {
-                    if let Err(error) =
-                        self.send_command(TrayCommand::SubmitPairingPin { receiver_id, pin })
-                    {
-                        self.fail_and_exit(event_loop, error);
+            } => {
+                let i18n = self.menu.as_ref().map_or_else(
+                    || TrayI18n::new(TrayLanguagePreference::System),
+                    TrayMenu::i18n,
+                );
+                match prompt_for_pin(&display_name, i18n) {
+                    Ok(Some(pin)) => {
+                        if let Err(error) =
+                            self.send_command(TrayCommand::SubmitPairingPin { receiver_id, pin })
+                        {
+                            self.fail_and_exit(event_loop, error);
+                        }
+                    }
+                    Ok(None) => {
+                        if let Err(error) = self.send_command(TrayCommand::CancelPairingPrompt) {
+                            self.fail_and_exit(event_loop, error);
+                        }
+                    }
+                    Err(error) => {
+                        show_alert(MessageLevel::Error, &error);
+                        if let Err(send_error) = self.send_command(TrayCommand::CancelPairingPrompt)
+                        {
+                            self.fail_and_exit(event_loop, send_error);
+                        }
                     }
                 }
-                Ok(None) => {
-                    if let Err(error) = self.send_command(TrayCommand::CancelPairingPrompt) {
-                        self.fail_and_exit(event_loop, error);
-                    }
-                }
-                Err(error) => {
-                    show_alert(MessageLevel::Error, &error);
-                    if let Err(send_error) = self.send_command(TrayCommand::CancelPairingPrompt) {
-                        self.fail_and_exit(event_loop, send_error);
-                    }
-                }
-            },
+            }
             TrayEvent::Info(message) => show_alert(MessageLevel::Info, &message),
             TrayEvent::Error(message) => show_alert(MessageLevel::Error, &message),
             TrayEvent::ExitRequested => event_loop.exit(),
@@ -244,30 +258,57 @@ struct TrayMenu {
     start_streaming: MenuItem,
     stop_streaming: MenuItem,
     start_at_login: CheckMenuItem,
+    language: Submenu,
+    language_system: CheckMenuItem,
+    language_en_us: CheckMenuItem,
+    language_zh_cn: CheckMenuItem,
     quit: MenuItem,
     target_items: HashMap<String, CheckMenuItem>,
+    language_preference: TrayLanguagePreference,
+}
+
+struct TrayLanguageMenu {
+    submenu: Submenu,
+    system: CheckMenuItem,
+    en_us: CheckMenuItem,
+    zh_cn: CheckMenuItem,
 }
 
 impl TrayMenu {
     fn build() -> Result<Self, String> {
+        let i18n = TrayI18n::new(TrayLanguagePreference::System);
         let root = Menu::new();
-        let status = MenuItem::new("Status: Starting...", false, None);
-        let refresh = MenuItem::with_id(MENU_ID_REFRESH, "Refresh Devices", true, None);
-        let playback_targets = Submenu::new("Playback Targets", true);
-        let pair_device = Submenu::new("Pair Device", true);
-        let forget_pairing = Submenu::new("Forget Pairing", true);
-        let start_streaming =
-            MenuItem::with_id(MENU_ID_START_STREAMING, "Start Streaming", false, None);
-        let stop_streaming =
-            MenuItem::with_id(MENU_ID_STOP_STREAMING, "Stop Streaming", false, None);
+        let status = MenuItem::new(i18n.text(TrayText::StatusStarting), false, None);
+        let refresh = MenuItem::with_id(
+            MENU_ID_REFRESH,
+            i18n.text(TrayText::RefreshDevices),
+            true,
+            None,
+        );
+        let playback_targets = Submenu::new(i18n.text(TrayText::PlaybackTargets), true);
+        let pair_device = Submenu::new(i18n.text(TrayText::PairDevice), true);
+        let forget_pairing = Submenu::new(i18n.text(TrayText::ForgetPairing), true);
+        let start_streaming = MenuItem::with_id(
+            MENU_ID_START_STREAMING,
+            i18n.text(TrayText::StartStreaming),
+            false,
+            None,
+        );
+        let stop_streaming = MenuItem::with_id(
+            MENU_ID_STOP_STREAMING,
+            i18n.text(TrayText::StopStreaming),
+            false,
+            None,
+        );
         let start_at_login = CheckMenuItem::with_id(
             MENU_ID_START_AT_LOGIN,
-            "Start at login",
+            i18n.text(TrayText::StartAtLogin),
             true,
             platform::is_start_at_login_enabled().unwrap_or(false),
             None,
         );
-        let quit = MenuItem::with_id(MENU_ID_QUIT, "Quit", true, None);
+        let language_menu = build_language_menu(i18n)?;
+        let quit = MenuItem::with_id(MENU_ID_QUIT, i18n.text(TrayText::Quit), true, None);
 
         let separator_a = PredefinedMenuItem::separator();
         let separator_b = PredefinedMenuItem::separator();
@@ -285,6 +326,7 @@ impl TrayMenu {
             &stop_streaming,
             &separator_c,
             &start_at_login,
+            &language_menu.submenu,
             &separator_d,
             &quit,
         ])
@@ -300,18 +342,27 @@ impl TrayMenu {
             start_streaming,
             stop_streaming,
             start_at_login,
+            language: language_menu.submenu,
+            language_system: language_menu.system,
+            language_en_us: language_menu.en_us,
+            language_zh_cn: language_menu.zh_cn,
             quit,
             target_items: HashMap::new(),
+            language_preference: TrayLanguagePreference::System,
         };
         menu.apply_snapshot(&TraySnapshot {
             phase: TrayPhase::Idle,
             receivers: Vec::new(),
+            language: TrayLanguagePreference::System,
         })?;
         Ok(menu)
     }
 
     fn apply_snapshot(&mut self, snapshot: &TraySnapshot) -> Result<(), String> {
+        self.language_preference = snapshot.language;
+        self.apply_static_text();
         self.status.set_text(format_status(snapshot));
+        self.sync_language_checks();
         self.rebuild_targets(snapshot)?;
         self.rebuild_pair_devices(snapshot)?;
         self.rebuild_forget_pairing(snapshot)?;
@@ -328,6 +379,43 @@ impl TrayMenu {
         Ok(())
     }
 
+    fn i18n(&self) -> TrayI18n {
+        TrayI18n::new(self.language_preference)
+    }
+
+    fn apply_static_text(&self) {
+        let i18n = self.i18n();
+        self.refresh.set_text(i18n.text(TrayText::RefreshDevices));
+        self.playback_targets
+            .set_text(i18n.text(TrayText::PlaybackTargets));
+        self.pair_device.set_text(i18n.text(TrayText::PairDevice));
+        self.forget_pairing
+            .set_text(i18n.text(TrayText::ForgetPairing));
+        self.start_streaming
+            .set_text(i18n.text(TrayText::StartStreaming));
+        self.stop_streaming
+            .set_text(i18n.text(TrayText::StopStreaming));
+        self.start_at_login
+            .set_text(i18n.text(TrayText::StartAtLogin));
+        self.language.set_text(i18n.text(TrayText::Language));
+        self.language_system
+            .set_text(i18n.text(TrayText::LanguageSystem));
+        self.language_en_us
+            .set_text(i18n.text(TrayText::LanguageEnglish));
+        self.language_zh_cn
+            .set_text(i18n.text(TrayText::LanguageChinese));
+        self.quit.set_text(i18n.text(TrayText::Quit));
+    }
+
+    fn sync_language_checks(&self) {
+        self.language_system
+            .set_checked(self.language_preference == TrayLanguagePreference::System);
+        self.language_en_us
+            .set_checked(self.language_preference == TrayLanguagePreference::EnUs);
+        self.language_zh_cn
+            .set_checked(self.language_preference == TrayLanguagePreference::ZhCn);
+    }
+
     fn checked_state(&self, receiver_id: &str) -> Option<bool> {
         self.target_items
             .get(receiver_id)
@@ -339,7 +427,10 @@ impl TrayMenu {
         self.target_items.clear();
 
         if snapshot.receivers.is_empty() {
-            append_placeholder(&self.playback_targets, "No devices available")?;
+            append_placeholder(
+                &self.playback_targets,
+                self.i18n().text(TrayText::NoDevicesAvailable),
+            )?;
             return Ok(());
         }
 
@@ -365,13 +456,20 @@ impl TrayMenu {
         clear_submenu(&self.pair_device);
 
         if snapshot.receivers.is_empty() {
-            append_placeholder(&self.pair_device, "No devices available")?;
+            append_placeholder(
+                &self.pair_device,
+                self.i18n().text(TrayText::NoDevicesAvailable),
+            )?;
             return Ok(());
         }
 
         for entry in &snapshot.receivers {
             let label = if entry.is_paired {
-                format!("{} (paired)", tray_receiver_label(entry))
+                format!(
+                    "{} ({})",
+                    tray_receiver_label(entry),
+                    self.i18n().text(TrayText::PairedSuffix)
+                )
             } else {
                 tray_receiver_label(entry)
             };
@@ -398,7 +496,10 @@ impl TrayMenu {
             .filter(|entry| entry.is_paired)
             .collect();
         if paired_entries.is_empty() {
-            append_placeholder(&self.forget_pairing, "No saved pairings")?;
+            append_placeholder(
+                &self.forget_pairing,
+                self.i18n().text(TrayText::NoSavedPairings),
+            )?;
             return Ok(());
         }
 
@@ -491,6 +592,41 @@ fn append_placeholder(submenu: &Submenu, text: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to update placeholder menu item: {error}"))
 }
 
+fn build_language_menu(i18n: TrayI18n) -> Result<TrayLanguageMenu, String> {
+    let submenu = Submenu::new(i18n.text(TrayText::Language), true);
+    let system = CheckMenuItem::with_id(
+        MENU_ID_LANGUAGE_SYSTEM,
+        i18n.text(TrayText::LanguageSystem),
+        true,
+        true,
+        None,
+    );
+    let en_us = CheckMenuItem::with_id(
+        MENU_ID_LANGUAGE_EN_US,
+        i18n.text(TrayText::LanguageEnglish),
+        true,
+        false,
+        None,
+    );
+    let zh_cn = CheckMenuItem::with_id(
+        MENU_ID_LANGUAGE_ZH_CN,
+        i18n.text(TrayText::LanguageChinese),
+        true,
+        false,
+        None,
+    );
+    submenu
+        .append_items(&[&system, &en_us, &zh_cn])
+        .map_err(|error| format!("failed to build language menu: {error}"))?;
+
+    Ok(TrayLanguageMenu {
+        submenu,
+        system,
+        en_us,
+        zh_cn,
+    })
+}
+
 fn build_target_label(entry: &crate::app::TrayReceiverEntry) -> String {
     if entry.host.is_empty() {
         tray_receiver_label(entry)
@@ -500,18 +636,19 @@ fn build_target_label(entry: &crate::app::TrayReceiverEntry) -> String {
 }
 
 fn format_status(snapshot: &TraySnapshot) -> String {
+    let i18n = TrayI18n::new(snapshot.language);
     match &snapshot.phase {
-        TrayPhase::Idle => String::from("Status: Idle"),
+        TrayPhase::Idle => i18n.text(TrayText::StatusIdle).to_string(),
         TrayPhase::WaitingForPin { receiver_id } => {
             let label = snapshot
                 .receivers
                 .iter()
                 .find(|entry| &entry.receiver_id == receiver_id)
                 .map_or_else(|| receiver_id.clone(), tray_receiver_label);
-            format!("Status: Waiting for PIN - {label}")
+            i18n.status_waiting_for_pin(&label)
         }
         TrayPhase::Streaming { receiver_ids } => {
-            format!("Status: Streaming to {} device(s)", receiver_ids.len())
+            i18n.status_streaming_to_devices(receiver_ids.len())
         }
     }
 }
@@ -525,8 +662,8 @@ fn show_alert(level: MessageLevel, message: &str) {
         .show();
 }
 
-fn prompt_for_pin(display_name: &str) -> Result<Option<String>, String> {
-    let prompt = powershell_single_quoted(&format!("Enter the PIN shown on {display_name}:"));
+fn prompt_for_pin(display_name: &str, i18n: TrayI18n) -> Result<Option<String>, String> {
+    let prompt = powershell_single_quoted(&i18n.enter_pin_shown_on(display_name));
     let title = powershell_single_quoted(APP_TITLE);
     let script = format!(
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName Microsoft.VisualBasic; $pin = [Microsoft.VisualBasic.Interaction]::InputBox('{prompt}', '{title}', ''); [Console]::Out.Write($pin)"
@@ -579,6 +716,15 @@ fn parse_menu_action(menu_id: &MenuId) -> Option<MenuAction> {
     if menu_id == MENU_ID_START_AT_LOGIN {
         return Some(MenuAction::ToggleStartAtLogin);
     }
+    if menu_id == MENU_ID_LANGUAGE_SYSTEM {
+        return Some(MenuAction::SetLanguage(TrayLanguagePreference::System));
+    }
+    if menu_id == MENU_ID_LANGUAGE_EN_US {
+        return Some(MenuAction::SetLanguage(TrayLanguagePreference::EnUs));
+    }
+    if menu_id == MENU_ID_LANGUAGE_ZH_CN {
+        return Some(MenuAction::SetLanguage(TrayLanguagePreference::ZhCn));
+    }
     if menu_id == MENU_ID_QUIT {
         return Some(MenuAction::Quit);
     }
@@ -605,6 +751,8 @@ fn parse_menu_action(menu_id: &MenuId) -> Option<MenuAction> {
 mod tests {
     use tray_icon::menu::MenuId;
 
+    use crate::config::TrayLanguagePreference;
+
     use super::{MenuAction, parse_menu_action};
 
     #[test]
@@ -624,6 +772,10 @@ mod tests {
         assert_eq!(
             parse_menu_action(&MenuId::new("start-at-login")),
             Some(MenuAction::ToggleStartAtLogin)
+        );
+        assert_eq!(
+            parse_menu_action(&MenuId::new("language:zh-cn")),
+            Some(MenuAction::SetLanguage(TrayLanguagePreference::ZhCn))
         );
     }
 

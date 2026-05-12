@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub receiver_cache: HashMap<String, CachedReceiver>,
     #[serde(default)]
     pub tray_selected_receiver_ids: Vec<String>,
+    #[serde(default)]
+    pub tray_language: TrayLanguagePreference,
 }
 
 impl Default for AppConfig {
@@ -40,6 +42,7 @@ impl Default for AppConfig {
             paired_receivers: HashMap::new(),
             receiver_cache: HashMap::new(),
             tray_selected_receiver_ids: Vec::new(),
+            tray_language: TrayLanguagePreference::default(),
         }
     }
 }
@@ -69,8 +72,21 @@ impl AppConfig {
     pub fn set_tray_selected_receiver_ids(&mut self, receiver_ids: Vec<String>) {
         self.tray_selected_receiver_ids = receiver_ids;
     }
+
+    pub fn set_tray_language(&mut self, language: TrayLanguagePreference) {
+        self.tray_language = language;
+    }
 }
 
 const fn default_sender_volume_percent() -> u16 {
     DEFAULT_SENDER_VOLUME_PERCENT
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrayLanguagePreference {
+    #[default]
+    System,
+    EnUs,
+    ZhCn,
 }
