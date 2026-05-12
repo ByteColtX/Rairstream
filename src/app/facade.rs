@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::config::{
-    AppConfig, CachedReceiver, ConfigError, default_config_path, load_config, save_config,
+    AppConfig, CachedReceiver, ConfigError, TrayLanguagePreference, default_config_path,
+    load_config, save_config,
 };
 use crate::discovery::{DiscoveryService, MdnsDiscoveryService};
 use crate::error::RairstreamError;
@@ -186,6 +187,15 @@ where
         }
 
         self.config.set_tray_selected_receiver_ids(normalized_ids);
+        self.persist_config()?;
+        Ok(())
+    }
+
+    pub fn set_tray_language(
+        &mut self,
+        language: TrayLanguagePreference,
+    ) -> Result<(), RairstreamError> {
+        self.config.set_tray_language(language);
         self.persist_config()?;
         Ok(())
     }
@@ -653,6 +663,33 @@ mod tests {
         assert_eq!(
             reloaded.tray_selected_receiver_ids,
             vec![String::from("kitchen"), String::from("living-room")]
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_tray_language_persists() {
+        let path = temp_config_path();
+        let mut facade = AppFacade::with_config_path(
+            FixedDiscoveryService {
+                receivers: Vec::new(),
+            },
+            path.clone(),
+        )
+        .unwrap();
+
+        facade
+            .set_tray_language(crate::config::TrayLanguagePreference::ZhCn)
+            .unwrap();
+
+        assert_eq!(
+            facade.config().tray_language,
+            crate::config::TrayLanguagePreference::ZhCn
+        );
+        let reloaded = crate::config::load_config(&path).unwrap();
+        assert_eq!(
+            reloaded.tray_language,
+            crate::config::TrayLanguagePreference::ZhCn
         );
         let _ = std::fs::remove_file(path);
     }

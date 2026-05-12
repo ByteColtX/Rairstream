@@ -1,7 +1,10 @@
 use crate::app::{AppFacade, TrayReceiverEntry};
+use crate::config::TrayLanguagePreference;
 use crate::discovery::DiscoveryService;
 use crate::error::RairstreamError;
 use crate::session::PlaybackSession;
+
+pub mod i18n;
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -31,6 +34,7 @@ pub enum TrayPhase {
 pub struct TraySnapshot {
     pub phase: TrayPhase,
     pub receivers: Vec<TrayReceiverEntry>,
+    pub language: TrayLanguagePreference,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +47,7 @@ pub enum TrayCommand {
     ForgetPairing { receiver_id: String },
     StartStreaming,
     StopStreaming,
+    SetLanguage { language: TrayLanguagePreference },
     Quit,
 }
 
@@ -135,6 +140,7 @@ where
         TraySnapshot {
             phase: self.runtime.phase().clone(),
             receivers: self.facade.tray_receivers(),
+            language: self.facade.config().tray_language,
         }
     }
 
@@ -158,6 +164,7 @@ where
             TrayCommand::ForgetPairing { receiver_id } => self.forget_pairing(&receiver_id),
             TrayCommand::StartStreaming => self.start_streaming(),
             TrayCommand::StopStreaming => self.stop_streaming(),
+            TrayCommand::SetLanguage { language } => self.set_language(language),
             TrayCommand::Quit => self.quit(),
         }
     }
@@ -224,10 +231,10 @@ where
         self.runtime.cancel_waiting_for_pin();
         match self.facade.pair(receiver_id, pin) {
             Ok(entry) => vec![
-                TrayEvent::Info(format!(
-                    "saved pairing for {}",
-                    entry.display_name.unwrap_or(entry.receiver_id)
-                )),
+                TrayEvent::Info(
+                    self.i18n()
+                        .saved_pairing_for(&entry.display_name.unwrap_or(entry.receiver_id)),
+                ),
                 self.snapshot_event(),
             ],
             Err(error) => vec![TrayEvent::Error(error.to_string()), self.snapshot_event()],
@@ -237,10 +244,10 @@ where
     fn forget_pairing(&mut self, receiver_id: &str) -> Vec<TrayEvent> {
         match self.facade.paired_forget(receiver_id) {
             Ok(entry) => vec![
-                TrayEvent::Info(format!(
-                    "removed pairing for {}",
-                    entry.display_name.unwrap_or(entry.receiver_id)
-                )),
+                TrayEvent::Info(
+                    self.i18n()
+                        .removed_pairing_for(&entry.display_name.unwrap_or(entry.receiver_id)),
+                ),
                 self.snapshot_event(),
             ],
             Err(error) => vec![TrayEvent::Error(error.to_string()), self.snapshot_event()],
@@ -251,7 +258,11 @@ where
         let selected_ids = self.selected_receiver_ids();
         if selected_ids.is_empty() {
             return vec![
-                TrayEvent::Error(String::from("select at least one playback target")),
+                TrayEvent::Error(
+                    self.i18n()
+                        .text(i18n::TrayText::SelectPlaybackTarget)
+                        .to_string(),
+                ),
                 self.snapshot_event(),
             ];
         }
@@ -332,6 +343,15 @@ where
     fn snapshot_event(&self) -> TrayEvent {
         TrayEvent::SnapshotUpdated(self.snapshot())
     }
+
+    fn set_language(&mut self, language: TrayLanguagePreference) -> Vec<TrayEvent> {
+        let result = self.facade.set_tray_language(language);
+        self.finish_config_write(result)
+    }
+
+    fn i18n(&self) -> i18n::TrayI18n {
+        i18n::TrayI18n::new(self.facade.config().tray_language)
+    }
 }
 
 #[must_use]
@@ -350,7 +370,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::app::AppFacade;
-    use crate::config::{AppConfig, save_config};
+    use crate::config::{AppConfig, TrayLanguagePreference, save_config};
     use crate::pairing::{ReceiverAuthFlow, ReceiverCredentials};
     use crate::receiver::{
         AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
@@ -566,6 +586,25 @@ mod tests {
                 TrayPhase::WaitingForPin { ref receiver_id } if receiver_id == "living-room"
             ) && receiver_id == "living-room" && display_name == "Living Room"
         ));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn worker_persists_language_selection() {
+        let config = AppConfig::default();
+        let (mut worker, path) = build_worker(&config, Vec::new());
+
+        let events = worker.handle_command(TrayCommand::SetLanguage {
+            language: TrayLanguagePreference::ZhCn,
+        });
+
+        assert!(matches!(
+            &events[..],
+            [TrayEvent::SnapshotUpdated(snapshot)]
+                if snapshot.language == TrayLanguagePreference::ZhCn
+        ));
+        let reloaded = crate::config::load_config(&path).unwrap();
+        assert_eq!(reloaded.tray_language, TrayLanguagePreference::ZhCn);
         let _ = std::fs::remove_file(path);
     }
 }
