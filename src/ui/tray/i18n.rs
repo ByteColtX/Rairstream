@@ -105,6 +105,48 @@ pub fn resolve_locale(
 }
 
 fn detected_system_locale() -> Option<String> {
+    platform_system_locale().or_else(env_system_locale)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_system_locale() -> Option<String> {
+    windows_user_default_locale_name()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn platform_system_locale() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+fn windows_user_default_locale_name() -> Option<String> {
+    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
+
+    const LOCALE_NAME_MAX_LENGTH: usize = 85;
+
+    let mut locale_name = [0_u16; LOCALE_NAME_MAX_LENGTH];
+    #[allow(unsafe_code)]
+    // SAFETY: `locale_name` is a valid writable UTF-16 buffer for the duration
+    // of the call, and the length passed matches the buffer capacity.
+    let length = unsafe {
+        GetUserDefaultLocaleName(
+            locale_name.as_mut_ptr(),
+            i32::try_from(locale_name.len()).ok()?,
+        )
+    };
+
+    if length <= 1 {
+        return None;
+    }
+
+    let length = usize::try_from(length).ok()?;
+    String::from_utf16(&locale_name[..length - 1])
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn env_system_locale() -> Option<String> {
     ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
         .into_iter()
         .find_map(|key| {
@@ -196,12 +238,32 @@ mod tests {
             TrayLocale::ZhCn
         );
         assert_eq!(
+            resolve_locale(TrayLanguagePreference::System, Some("zh-CN")),
+            TrayLocale::ZhCn
+        );
+        assert_eq!(
+            resolve_locale(TrayLanguagePreference::System, Some("en-US")),
+            TrayLocale::EnUs
+        );
+        assert_eq!(
             resolve_locale(TrayLanguagePreference::System, Some("fr-FR")),
             TrayLocale::EnUs
         );
         assert_eq!(
+            resolve_locale(TrayLanguagePreference::System, None),
+            TrayLocale::EnUs
+        );
+    }
+
+    #[test]
+    fn explicit_language_preference_overrides_system_locale() {
+        assert_eq!(
             resolve_locale(TrayLanguagePreference::EnUs, Some("zh-CN")),
             TrayLocale::EnUs
+        );
+        assert_eq!(
+            resolve_locale(TrayLanguagePreference::ZhCn, Some("en-US")),
+            TrayLocale::ZhCn
         );
     }
 
