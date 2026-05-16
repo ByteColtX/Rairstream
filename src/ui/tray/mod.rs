@@ -3,6 +3,7 @@ use crate::config::TrayLanguagePreference;
 use crate::discovery::DiscoveryService;
 use crate::error::RairstreamError;
 use crate::session::PlaybackSession;
+use std::time::{Duration, Instant};
 
 pub mod i18n;
 
@@ -28,6 +29,10 @@ pub enum TrayPhase {
     Streaming {
         receiver_ids: Vec<String>,
     },
+    Reconnecting {
+        receiver_ids: Vec<String>,
+        attempt: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +40,7 @@ pub struct TraySnapshot {
     pub phase: TrayPhase,
     pub receivers: Vec<TrayReceiverEntry>,
     pub language: TrayLanguagePreference,
+    pub auto_reconnect: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +53,7 @@ pub enum TrayCommand {
     ForgetPairing { receiver_id: String },
     StartStreaming,
     StopStreaming,
+    SetAutoReconnect { enabled: bool },
     SetLanguage { language: TrayLanguagePreference },
     Quit,
 }
@@ -98,6 +105,14 @@ impl TrayRuntimeState {
         self.phase = TrayPhase::Streaming { receiver_ids };
     }
 
+    pub fn begin_reconnecting(&mut self, receiver_ids: Vec<String>, attempt: u32) {
+        self.exit_after_stop = false;
+        self.phase = TrayPhase::Reconnecting {
+            receiver_ids,
+            attempt,
+        };
+    }
+
     #[must_use]
     pub fn stop_streaming(&mut self) -> bool {
         self.phase = TrayPhase::Idle;
@@ -108,7 +123,10 @@ impl TrayRuntimeState {
 
     #[must_use]
     pub fn request_quit(&mut self) -> QuitAction {
-        if matches!(self.phase, TrayPhase::Streaming { .. }) {
+        if matches!(
+            self.phase,
+            TrayPhase::Streaming { .. } | TrayPhase::Reconnecting { .. }
+        ) {
             self.exit_after_stop = true;
             QuitAction::StopStreamingFirst
         } else {
@@ -121,6 +139,7 @@ pub struct TrayWorker<D> {
     facade: AppFacade<D>,
     runtime: TrayRuntimeState,
     active_session: Option<PlaybackSession>,
+    reconnect_due: Option<Instant>,
 }
 
 impl<D> TrayWorker<D>
@@ -132,6 +151,7 @@ where
             facade,
             runtime: TrayRuntimeState::default(),
             active_session: None,
+            reconnect_due: None,
         }
     }
 
@@ -141,6 +161,7 @@ where
             phase: self.runtime.phase().clone(),
             receivers: self.facade.tray_receivers(),
             language: self.facade.config().tray_language,
+            auto_reconnect: self.facade.config().auto_reconnect,
         }
     }
 
@@ -164,21 +185,22 @@ where
             TrayCommand::ForgetPairing { receiver_id } => self.forget_pairing(&receiver_id),
             TrayCommand::StartStreaming => self.start_streaming(),
             TrayCommand::StopStreaming => self.stop_streaming(),
+            TrayCommand::SetAutoReconnect { enabled } => self.set_auto_reconnect(enabled),
             TrayCommand::SetLanguage { language } => self.set_language(language),
             TrayCommand::Quit => self.quit(),
         }
     }
 
     pub fn poll(&mut self) -> Vec<TrayEvent> {
-        let Some(error) = self
+        if let Some(error) = self
             .active_session
             .as_ref()
             .and_then(PlaybackSession::transport_error)
-        else {
-            return Vec::new();
-        };
+        {
+            return self.handle_transport_error(error);
+        }
 
-        self.stop_active_session_with_error(error)
+        self.poll_reconnect(Instant::now())
     }
 
     fn refresh_devices(&mut self) -> Vec<TrayEvent> {
@@ -270,6 +292,7 @@ where
         match self.facade.play_capture(&selected_ids) {
             Ok(session) => {
                 self.active_session = Some(session);
+                self.reconnect_due = None;
                 self.runtime.start_streaming(selected_ids);
                 vec![self.snapshot_event()]
             }
@@ -290,6 +313,7 @@ where
 
     fn stop_active_session(&mut self, exit_after_stop: bool) -> Vec<TrayEvent> {
         let mut events = Vec::new();
+        self.reconnect_due = None;
         if let Some(session) = self.active_session.take() {
             if let Err(error) = self.facade.stop_capture(session) {
                 events.push(TrayEvent::Error(error.to_string()));
@@ -304,7 +328,12 @@ where
         events
     }
 
-    fn stop_active_session_with_error(&mut self, error: RairstreamError) -> Vec<TrayEvent> {
+    fn handle_transport_error(&mut self, error: RairstreamError) -> Vec<TrayEvent> {
+        let receiver_ids = match self.runtime.phase() {
+            TrayPhase::Streaming { receiver_ids } => receiver_ids.clone(),
+            _ => Vec::new(),
+        };
+
         let error = if let Some(session) = self.active_session.take() {
             match self.facade.stop_capture(session) {
                 Ok(()) => error,
@@ -316,12 +345,51 @@ where
             error
         };
 
+        if self.facade.config().auto_reconnect && !receiver_ids.is_empty() {
+            self.runtime.begin_reconnecting(receiver_ids, 1);
+            self.reconnect_due = Some(Instant::now());
+            return vec![TrayEvent::Error(error.to_string()), self.snapshot_event()];
+        }
+
         let should_exit = self.runtime.stop_streaming();
         let mut events = vec![TrayEvent::Error(error.to_string()), self.snapshot_event()];
         if should_exit {
             events.push(TrayEvent::ExitRequested);
         }
         events
+    }
+
+    fn poll_reconnect(&mut self, now: Instant) -> Vec<TrayEvent> {
+        let Some(due) = self.reconnect_due else {
+            return Vec::new();
+        };
+        if now < due {
+            return Vec::new();
+        }
+
+        let TrayPhase::Reconnecting {
+            receiver_ids,
+            attempt,
+        } = self.runtime.phase()
+        else {
+            self.reconnect_due = None;
+            return Vec::new();
+        };
+        let receiver_ids = receiver_ids.clone();
+        let attempt = *attempt;
+
+        let _ = self.facade.discover();
+        if let Ok(session) = self.facade.play_capture(&receiver_ids) {
+            self.active_session = Some(session);
+            self.reconnect_due = None;
+            self.runtime.start_streaming(receiver_ids);
+            vec![self.snapshot_event()]
+        } else {
+            let next_attempt = attempt.saturating_add(1);
+            self.runtime.begin_reconnecting(receiver_ids, next_attempt);
+            self.reconnect_due = Some(now + reconnect_delay(next_attempt));
+            vec![self.snapshot_event()]
+        }
     }
 
     fn finish_config_write(&mut self, result: Result<(), RairstreamError>) -> Vec<TrayEvent> {
@@ -349,8 +417,25 @@ where
         self.finish_config_write(result)
     }
 
+    fn set_auto_reconnect(&mut self, enabled: bool) -> Vec<TrayEvent> {
+        let result = self.facade.set_auto_reconnect(enabled);
+        self.finish_config_write(result)
+    }
+
     fn i18n(&self) -> i18n::TrayI18n {
         i18n::TrayI18n::new(self.facade.config().tray_language)
+    }
+}
+
+#[must_use]
+fn reconnect_delay(attempt: u32) -> Duration {
+    match attempt {
+        0 | 1 => Duration::ZERO,
+        2 => Duration::from_secs(2),
+        3 => Duration::from_secs(5),
+        4 => Duration::from_secs(10),
+        5 => Duration::from_secs(30),
+        _ => Duration::from_secs(60),
     }
 }
 
@@ -367,7 +452,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use crate::app::AppFacade;
     use crate::config::{AppConfig, TrayLanguagePreference, save_config};
@@ -376,7 +461,10 @@ mod tests {
         AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
 
-    use super::{QuitAction, TrayCommand, TrayEvent, TrayPhase, TrayRuntimeState, TrayWorker};
+    use super::{
+        QuitAction, TrayCommand, TrayEvent, TrayPhase, TrayRuntimeState, TrayWorker,
+        reconnect_delay,
+    };
     use crate::discovery::DiscoveryService;
 
     #[derive(Clone)]
@@ -467,6 +555,41 @@ mod tests {
         assert_eq!(state.request_quit(), QuitAction::StopStreamingFirst);
         assert!(state.stop_streaming());
         assert_eq!(state.phase(), &TrayPhase::Idle);
+    }
+
+    #[test]
+    fn runtime_state_requests_stop_before_exit_while_reconnecting() {
+        let mut state = TrayRuntimeState::default();
+        state.begin_reconnecting(vec![String::from("living-room")], 2);
+
+        assert_eq!(state.request_quit(), QuitAction::StopStreamingFirst);
+        assert!(state.stop_streaming());
+        assert_eq!(state.phase(), &TrayPhase::Idle);
+    }
+
+    #[test]
+    fn runtime_state_tracks_reconnecting_attempt() {
+        let mut state = TrayRuntimeState::default();
+        state.begin_reconnecting(vec![String::from("living-room")], 3);
+
+        assert_eq!(
+            state.phase(),
+            &TrayPhase::Reconnecting {
+                receiver_ids: vec![String::from("living-room")],
+                attempt: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn reconnect_delay_uses_capped_backoff() {
+        assert_eq!(reconnect_delay(1), Duration::ZERO);
+        assert_eq!(reconnect_delay(2), Duration::from_secs(2));
+        assert_eq!(reconnect_delay(3), Duration::from_secs(5));
+        assert_eq!(reconnect_delay(4), Duration::from_secs(10));
+        assert_eq!(reconnect_delay(5), Duration::from_secs(30));
+        assert_eq!(reconnect_delay(6), Duration::from_secs(60));
+        assert_eq!(reconnect_delay(99), Duration::from_secs(60));
     }
 
     #[test]
@@ -605,6 +728,16 @@ mod tests {
         ));
         let reloaded = crate::config::load_config(&path).unwrap();
         assert_eq!(reloaded.tray_language, TrayLanguagePreference::ZhCn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn worker_snapshot_includes_auto_reconnect_state() {
+        let mut config = AppConfig::default();
+        config.set_auto_reconnect(true);
+        let (worker, path) = build_worker(&config, Vec::new());
+
+        assert!(worker.snapshot().auto_reconnect);
         let _ = std::fs::remove_file(path);
     }
 }

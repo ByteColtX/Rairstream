@@ -7,6 +7,15 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::{is_start_at_login_enabled, set_start_at_login_enabled};
 
+#[cfg(not(target_os = "windows"))]
+pub fn set_start_at_login_enabled(enabled: bool) -> Result<(), String> {
+    if enabled {
+        return Err(String::from("start at login is only supported on Windows"));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformInfo {
     pub os: &'static str,

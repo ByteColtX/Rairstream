@@ -12,12 +12,14 @@ pub enum TrayText {
     StatusIdle,
     StatusWaitingForPin,
     StatusStreamingToDevices,
+    StatusReconnecting,
     RefreshDevices,
     PlaybackTargets,
     PairDevice,
     ForgetPairing,
     StartStreaming,
     StopStreaming,
+    AutoReconnect,
     StartAtLogin,
     Language,
     LanguageSystem,
@@ -71,6 +73,14 @@ impl TrayI18n {
         format!(
             "{} {count} device(s)",
             self.text(TrayText::StatusStreamingToDevices)
+        )
+    }
+
+    #[must_use]
+    pub fn status_reconnecting(&self, count: usize, attempt: u32) -> String {
+        format!(
+            "{} {count} device(s) - attempt {attempt}",
+            self.text(TrayText::StatusReconnecting)
         )
     }
 
@@ -180,12 +190,14 @@ fn text_for(locale: TrayLocale, key: TrayText) -> &'static str {
         (TrayLocale::ZhCn, TrayText::StatusIdle) => "状态：空闲",
         (TrayLocale::ZhCn, TrayText::StatusWaitingForPin) => "状态：等待 PIN",
         (TrayLocale::ZhCn, TrayText::StatusStreamingToDevices) => "状态：正在串流到",
+        (TrayLocale::ZhCn, TrayText::StatusReconnecting) => "状态：正在重连到",
         (TrayLocale::ZhCn, TrayText::RefreshDevices) => "刷新设备",
         (TrayLocale::ZhCn, TrayText::PlaybackTargets) => "播放目标",
         (TrayLocale::ZhCn, TrayText::PairDevice) => "配对设备",
         (TrayLocale::ZhCn, TrayText::ForgetPairing) => "忘记配对",
         (TrayLocale::ZhCn, TrayText::StartStreaming) => "开始串流",
         (TrayLocale::ZhCn, TrayText::StopStreaming) => "停止串流",
+        (TrayLocale::ZhCn, TrayText::AutoReconnect) => "自动重连",
         (TrayLocale::ZhCn, TrayText::StartAtLogin) => "登录时启动",
         (TrayLocale::ZhCn, TrayText::Language) => "语言",
         (TrayLocale::ZhCn, TrayText::LanguageSystem) => "跟随系统",
@@ -203,12 +215,14 @@ fn text_for(locale: TrayLocale, key: TrayText) -> &'static str {
         (_, TrayText::StatusIdle) => "Status: Idle",
         (_, TrayText::StatusWaitingForPin) => "Status: Waiting for PIN",
         (_, TrayText::StatusStreamingToDevices) => "Status: Streaming to",
+        (_, TrayText::StatusReconnecting) => "Status: Reconnecting to",
         (_, TrayText::RefreshDevices) => "Refresh Devices",
         (_, TrayText::PlaybackTargets) => "Playback Targets",
         (_, TrayText::PairDevice) => "Pair Device",
         (_, TrayText::ForgetPairing) => "Forget Pairing",
         (_, TrayText::StartStreaming) => "Start Streaming",
         (_, TrayText::StopStreaming) => "Stop Streaming",
+        (_, TrayText::AutoReconnect) => "Auto Reconnect",
         (_, TrayText::StartAtLogin) => "Start at login",
         (_, TrayText::Language) => "Language",
         (_, TrayText::LanguageSystem) => "Follow System",

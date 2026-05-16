@@ -8,6 +8,7 @@ use crate::config::{
 use crate::discovery::{DiscoveryService, MdnsDiscoveryService};
 use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
+use crate::platform;
 use crate::receiver::{Receiver, selector};
 use crate::session::{
     PlaybackSession, pair_receiver_with_pin, play_capture, play_file,
@@ -196,6 +197,29 @@ where
         language: TrayLanguagePreference,
     ) -> Result<(), RairstreamError> {
         self.config.set_tray_language(language);
+        self.persist_config()?;
+        Ok(())
+    }
+
+    pub fn set_auto_reconnect(&mut self, enabled: bool) -> Result<(), RairstreamError> {
+        self.set_auto_reconnect_with_start_at_login(enabled, platform::set_start_at_login_enabled)
+    }
+
+    fn set_auto_reconnect_with_start_at_login<F>(
+        &mut self,
+        enabled: bool,
+        set_start_at_login_enabled: F,
+    ) -> Result<(), RairstreamError>
+    where
+        F: FnOnce(bool) -> Result<(), String>,
+    {
+        if enabled {
+            set_start_at_login_enabled(true).map_err(|message| RairstreamError::Playback {
+                message: format!("failed to enable start at login for auto reconnect: {message}"),
+            })?;
+        }
+
+        self.config.set_auto_reconnect(enabled);
         self.persist_config()?;
         Ok(())
     }
@@ -691,6 +715,55 @@ mod tests {
             reloaded.tray_language,
             crate::config::TrayLanguagePreference::ZhCn
         );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_auto_reconnect_enables_start_at_login_before_persisting() {
+        let path = temp_config_path();
+        let mut facade = AppFacade::with_config_path(
+            FixedDiscoveryService {
+                receivers: Vec::new(),
+            },
+            path.clone(),
+        )
+        .unwrap();
+
+        facade
+            .set_auto_reconnect_with_start_at_login(true, |enabled| {
+                assert!(enabled);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(facade.config().auto_reconnect);
+        let reloaded = crate::config::load_config(&path).unwrap();
+        assert!(reloaded.auto_reconnect);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_auto_reconnect_failure_does_not_persist_enabled_state() {
+        let path = temp_config_path();
+        let mut facade = AppFacade::with_config_path(
+            FixedDiscoveryService {
+                receivers: Vec::new(),
+            },
+            path.clone(),
+        )
+        .unwrap();
+
+        let error = facade
+            .set_auto_reconnect_with_start_at_login(true, |_| Err(String::from("registry denied")))
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "playback failed: failed to enable start at login for auto reconnect: registry denied"
+        );
+        assert!(!facade.config().auto_reconnect);
+        let reloaded = crate::config::load_config(&path).unwrap();
+        assert!(!reloaded.auto_reconnect);
         let _ = std::fs::remove_file(path);
     }
 

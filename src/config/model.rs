@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub tray_selected_receiver_ids: Vec<String>,
     #[serde(default)]
     pub tray_language: TrayLanguagePreference,
+    #[serde(default)]
+    pub auto_reconnect: bool,
 }
 
 impl Default for AppConfig {
@@ -43,6 +45,7 @@ impl Default for AppConfig {
             receiver_cache: HashMap::new(),
             tray_selected_receiver_ids: Vec::new(),
             tray_language: TrayLanguagePreference::default(),
+            auto_reconnect: false,
         }
     }
 }
@@ -75,6 +78,10 @@ impl AppConfig {
 
     pub fn set_tray_language(&mut self, language: TrayLanguagePreference) {
         self.tray_language = language;
+    }
+
+    pub fn set_auto_reconnect(&mut self, enabled: bool) {
+        self.auto_reconnect = enabled;
     }
 }
 

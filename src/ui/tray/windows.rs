@@ -29,6 +29,7 @@ const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MENU_ID_REFRESH: &str = "refresh";
 const MENU_ID_START_STREAMING: &str = "start-streaming";
 const MENU_ID_STOP_STREAMING: &str = "stop-streaming";
+const MENU_ID_AUTO_RECONNECT: &str = "auto-reconnect";
 const MENU_ID_START_AT_LOGIN: &str = "start-at-login";
 const MENU_ID_LANGUAGE_SYSTEM: &str = "language:system";
 const MENU_ID_LANGUAGE_EN_US: &str = "language:en-us";
@@ -49,6 +50,7 @@ enum MenuAction {
     Refresh,
     StartStreaming,
     StopStreaming,
+    ToggleAutoReconnect,
     ToggleStartAtLogin,
     SetLanguage(TrayLanguagePreference),
     Quit,
@@ -126,6 +128,10 @@ impl TrayApp {
             MenuAction::Refresh => TrayCommand::RefreshDevices,
             MenuAction::StartStreaming => TrayCommand::StartStreaming,
             MenuAction::StopStreaming => TrayCommand::StopStreaming,
+            MenuAction::ToggleAutoReconnect => {
+                let enabled = menu.auto_reconnect.is_checked();
+                TrayCommand::SetAutoReconnect { enabled }
+            }
             MenuAction::ToggleStartAtLogin => {
                 if let Some(menu) = self.menu.as_ref() {
                     let enabled = menu.start_at_login.is_checked();
@@ -257,6 +263,7 @@ struct TrayMenu {
     forget_pairing: Submenu,
     start_streaming: MenuItem,
     stop_streaming: MenuItem,
+    auto_reconnect: CheckMenuItem,
     start_at_login: CheckMenuItem,
     language: Submenu,
     language_system: CheckMenuItem,
@@ -300,6 +307,13 @@ impl TrayMenu {
             false,
             None,
         );
+        let auto_reconnect = CheckMenuItem::with_id(
+            MENU_ID_AUTO_RECONNECT,
+            i18n.text(TrayText::AutoReconnect),
+            true,
+            false,
+            None,
+        );
         let start_at_login = CheckMenuItem::with_id(
             MENU_ID_START_AT_LOGIN,
             i18n.text(TrayText::StartAtLogin),
@@ -325,6 +339,7 @@ impl TrayMenu {
             &start_streaming,
             &stop_streaming,
             &separator_c,
+            &auto_reconnect,
             &start_at_login,
             &language_menu.submenu,
             &separator_d,
@@ -341,6 +356,7 @@ impl TrayMenu {
             forget_pairing,
             start_streaming,
             stop_streaming,
+            auto_reconnect,
             start_at_login,
             language: language_menu.submenu,
             language_system: language_menu.system,
@@ -354,6 +370,7 @@ impl TrayMenu {
             phase: TrayPhase::Idle,
             receivers: Vec::new(),
             language: TrayLanguagePreference::System,
+            auto_reconnect: false,
         })?;
         Ok(menu)
     }
@@ -362,18 +379,26 @@ impl TrayMenu {
         self.language_preference = snapshot.language;
         self.apply_static_text();
         self.status.set_text(format_status(snapshot));
+        self.auto_reconnect.set_checked(snapshot.auto_reconnect);
+        if snapshot.auto_reconnect {
+            self.start_at_login.set_checked(true);
+        }
         self.sync_language_checks();
         self.rebuild_targets(snapshot)?;
         self.rebuild_pair_devices(snapshot)?;
         self.rebuild_forget_pairing(snapshot)?;
 
         let is_streaming = matches!(snapshot.phase, TrayPhase::Streaming { .. });
+        let is_reconnecting = matches!(snapshot.phase, TrayPhase::Reconnecting { .. });
         let is_waiting_for_pin = matches!(snapshot.phase, TrayPhase::WaitingForPin { .. });
         let has_selected_targets = snapshot.receivers.iter().any(|entry| entry.is_selected);
         self.refresh.set_enabled(!is_waiting_for_pin);
-        self.start_streaming
-            .set_enabled(!is_streaming && !is_waiting_for_pin && has_selected_targets);
-        self.stop_streaming.set_enabled(is_streaming);
+        self.start_streaming.set_enabled(
+            !is_streaming && !is_reconnecting && !is_waiting_for_pin && has_selected_targets,
+        );
+        self.stop_streaming
+            .set_enabled(is_streaming || is_reconnecting);
+        self.auto_reconnect.set_enabled(true);
         self.start_at_login.set_enabled(true);
         self.quit.set_enabled(true);
         Ok(())
@@ -395,6 +420,8 @@ impl TrayMenu {
             .set_text(i18n.text(TrayText::StartStreaming));
         self.stop_streaming
             .set_text(i18n.text(TrayText::StopStreaming));
+        self.auto_reconnect
+            .set_text(i18n.text(TrayText::AutoReconnect));
         self.start_at_login
             .set_text(i18n.text(TrayText::StartAtLogin));
         self.language.set_text(i18n.text(TrayText::Language));
@@ -650,6 +677,10 @@ fn format_status(snapshot: &TraySnapshot) -> String {
         TrayPhase::Streaming { receiver_ids } => {
             i18n.status_streaming_to_devices(receiver_ids.len())
         }
+        TrayPhase::Reconnecting {
+            receiver_ids,
+            attempt,
+        } => i18n.status_reconnecting(receiver_ids.len(), *attempt),
     }
 }
 
@@ -713,6 +744,9 @@ fn parse_menu_action(menu_id: &MenuId) -> Option<MenuAction> {
     if menu_id == MENU_ID_STOP_STREAMING {
         return Some(MenuAction::StopStreaming);
     }
+    if menu_id == MENU_ID_AUTO_RECONNECT {
+        return Some(MenuAction::ToggleAutoReconnect);
+    }
     if menu_id == MENU_ID_START_AT_LOGIN {
         return Some(MenuAction::ToggleStartAtLogin);
     }
@@ -764,6 +798,10 @@ mod tests {
         assert_eq!(
             parse_menu_action(&MenuId::new("start-streaming")),
             Some(MenuAction::StartStreaming)
+        );
+        assert_eq!(
+            parse_menu_action(&MenuId::new("auto-reconnect")),
+            Some(MenuAction::ToggleAutoReconnect)
         );
         assert_eq!(
             parse_menu_action(&MenuId::new("quit")),
