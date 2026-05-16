@@ -312,7 +312,7 @@ pub fn build_announce_request(
     cseq: u32,
     codec: &CodecDescription,
 ) -> RtspRequest {
-    let body = build_pcm_sdp(descriptor, codec);
+    let body = build_audio_sdp(descriptor, codec);
     apply_common_headers(
         descriptor,
         RtspRequest::new(RtspMethod::Announce, build_session_uri(descriptor))
@@ -432,18 +432,22 @@ pub fn parse_setup_reply(response: &RtspResponse) -> Result<SetupReply, AirPlayE
     })
 }
 
-fn build_pcm_sdp(descriptor: &SessionDescriptor, codec: &CodecDescription) -> String {
+fn build_audio_sdp(descriptor: &SessionDescriptor, codec: &CodecDescription) -> String {
     let sender_ip = resolve_sender_ip(&descriptor.device.host, descriptor.device.port)
         .unwrap_or_else(|| String::from("0.0.0.0"));
 
-    format!(
-        "v=0\r\no=Rairstream {} 0 IN IP4 {}\r\ns=Rairstream\r\nc=IN IP4 {}\r\nt=0 0\r\nm=audio 0 RTP/AVP 96\r\na=rtpmap:96 {}\r\na=min-latency:{}\r\n",
+    let mut body = format!(
+        "v=0\r\no=Rairstream {} 0 IN IP4 {}\r\ns=Rairstream\r\nc=IN IP4 {}\r\nt=0 0\r\nm=audio 0 RTP/AVP 96\r\na=rtpmap:96 {}\r\n",
         descriptor.stream_session_id(),
         sender_ip,
         sender_ip,
-        codec.rtpmap,
-        RAOP_STARTUP_LATENCY_FRAMES
-    )
+        codec.rtpmap
+    );
+    if let Some(fmtp) = &codec.fmtp {
+        let _ = write!(body, "a=fmtp:{fmtp}\r\n");
+    }
+    let _ = write!(body, "a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}\r\n");
+    body
 }
 
 fn resolve_sender_ip(receiver_host: &str, receiver_port: u16) -> Option<String> {
@@ -700,6 +704,18 @@ mod tests {
         assert!(body.contains("a=rtpmap:96 L16/44100/2"));
         assert!(body.contains(&format!("a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}")));
         assert!(body.contains("m=audio 0 RTP/AVP 96"));
+    }
+
+    #[test]
+    fn announce_request_contains_alac_sdp() {
+        let descriptor = build_descriptor();
+        let request = build_announce_request(&descriptor, 8, &CodecDescription::alac_stereo(352));
+        let body = request.body_text().unwrap();
+
+        assert_eq!(request.method, RtspMethod::Announce);
+        assert!(body.contains("a=rtpmap:96 AppleLossless"));
+        assert!(body.contains("a=fmtp:96 352 0 16 40 10 14 2 255 0 0 44100"));
+        assert!(body.contains(&format!("a=min-latency:{RAOP_STARTUP_LATENCY_FRAMES}")));
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::audio::{
     AudioCaptureError, AudioChunk, AudioResampler, AudioSink, RAOP_FRAMES_PER_PACKET,
+    RaopAudioPayload, RaopPayloadEncoder, SendCodec,
 };
 use crate::timing::clock::ntp_timestamp_now;
 
@@ -27,6 +28,7 @@ pub struct RaopStreamTransport {
 /// `RAOP` 音频发送端的最小配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaopSinkConfig {
+    pub codec: SendCodec,
     pub frames_per_packet: usize,
     pub sync_interval_packets: usize,
     pub sender_volume_percent: u16,
@@ -35,6 +37,7 @@ pub struct RaopSinkConfig {
 impl Default for RaopSinkConfig {
     fn default() -> Self {
         Self {
+            codec: SendCodec::PcmL16,
             frames_per_packet: RAOP_FRAMES_PER_PACKET,
             sync_interval_packets: 125,
             sender_volume_percent: 100,
@@ -46,6 +49,7 @@ impl Default for RaopSinkConfig {
 #[derive(Debug)]
 pub struct RaopAudioSink {
     resampler: AudioResampler,
+    payload_encoder: RaopPayloadEncoder,
     sender_volume_percent: Arc<Mutex<u16>>,
     transport: RaopStreamTransport,
     first_packet_in_stream: bool,
@@ -66,6 +70,7 @@ impl RaopAudioSink {
             sample_type = ?source_format.sample_type,
             audio_target = %transport.audio_target,
             control_target = %transport.control_target,
+            send_codec = transport.sink_config.codec.as_str(),
             sync_interval_packets = transport.sink_config.sync_interval_packets,
             "initializing RAOP audio sink"
         );
@@ -74,8 +79,13 @@ impl RaopAudioSink {
             .lock()
             .map_or(100, |sender_volume_percent| *sender_volume_percent);
         resampler.set_sender_volume_percent(initial_sender_volume_percent);
+        let payload_encoder = RaopPayloadEncoder::new(
+            transport.sink_config.codec,
+            transport.sink_config.frames_per_packet,
+        );
         Self {
             resampler,
+            payload_encoder,
             sender_volume_percent,
             transport,
             first_packet_in_stream: true,
@@ -90,8 +100,8 @@ impl RaopAudioSink {
         }
     }
 
-    fn send_audio_payload(&mut self, payload: Vec<u8>) -> Result<(), AudioCaptureError> {
-        let frames = payload.len() / 4;
+    fn send_audio_payload(&mut self, payload: RaopAudioPayload) -> Result<(), AudioCaptureError> {
+        let frames = payload.frames;
         let (sequence, timestamp) = self
             .transport
             .packet_counters
@@ -105,7 +115,7 @@ impl RaopAudioSink {
             timestamp,
             payload_type: RAOP_AUDIO_PAYLOAD_TYPE,
             ssrc: self.transport.audio_ssrc,
-            payload,
+            payload: payload.bytes,
         };
         let bytes = packet.encode();
         let packet_index = self.sent_audio_packets.saturating_add(1);
@@ -213,7 +223,13 @@ impl AudioSink for RaopAudioSink {
             }
         })?;
 
-        for payload in packets {
+        for pcm_packet in packets {
+            let payload = self
+                .payload_encoder
+                .encode_pcm_packet(&pcm_packet)
+                .map_err(|error| AudioCaptureError::InvalidFormat {
+                    message: error.to_string(),
+                })?;
             self.send_audio_payload(payload)?;
         }
 
@@ -227,7 +243,7 @@ mod tests {
 
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType, AudioSink};
 
-    use super::{RaopAudioSink, RaopSinkConfig, RaopStreamTransport};
+    use super::{RaopAudioSink, RaopSinkConfig, RaopStreamTransport, SendCodec};
     use crate::transport::packet::RaopPacketCounters;
     use std::sync::{Arc, Mutex};
 
@@ -238,6 +254,7 @@ mod tests {
         assert_eq!(config.frames_per_packet, 352);
         assert_eq!(config.sync_interval_packets, 125);
         assert_eq!(config.sender_volume_percent, 100);
+        assert_eq!(config.codec, SendCodec::PcmL16);
     }
 
     #[test]
@@ -258,6 +275,7 @@ mod tests {
             audio_ssrc: 0x1122_3344,
             packet_counters: RaopPacketCounters::new(7, 11),
             sink_config: RaopSinkConfig {
+                codec: SendCodec::PcmL16,
                 frames_per_packet: 352,
                 sync_interval_packets: 1,
                 sender_volume_percent: 100,

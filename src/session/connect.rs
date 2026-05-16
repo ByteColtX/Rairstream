@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 
-use crate::audio::AudioFormat;
+use crate::audio::{AudioFormat, SendCodecPreference};
 use crate::config::MAX_SENDER_VOLUME_PERCENT;
 use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
@@ -31,6 +31,7 @@ impl ConnectedReceiver {
     }
 }
 
+#[cfg(test)]
 pub fn connect_receivers<S>(
     receivers: &[Receiver],
     input_format: AudioFormat,
@@ -40,11 +41,31 @@ pub fn connect_receivers<S>(
 where
     S: BuildHasher,
 {
+    connect_receivers_with_codec_preference(
+        receivers,
+        input_format,
+        paired_receivers,
+        sender_volume_percent,
+        SendCodecPreference::Auto,
+    )
+}
+
+pub fn connect_receivers_with_codec_preference<S>(
+    receivers: &[Receiver],
+    input_format: AudioFormat,
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
+    sender_volume_percent: u16,
+    codec_preference: SendCodecPreference,
+) -> Result<Vec<ConnectedReceiver>, RairstreamError>
+where
+    S: BuildHasher,
+{
     let sender_volume_percent = sender_volume_percent.clamp(100, MAX_SENDER_VOLUME_PERCENT);
     let mut connected = Vec::with_capacity(receivers.len());
     for receiver in receivers {
         let mut descriptor = SessionDescriptor::new(receiver.clone(), input_format);
         descriptor.sender_volume_percent = sender_volume_percent;
+        descriptor.send_codec_preference = codec_preference;
         if let Some(credentials) = paired_receivers.get(&receiver.id).cloned() {
             descriptor = descriptor.with_receiver_credentials(credentials);
         }

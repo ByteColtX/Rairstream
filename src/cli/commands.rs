@@ -62,13 +62,21 @@ pub fn run_cli(cli: CliOptions) -> Result<(), RairstreamError> {
             print_paired_removed(&entry);
             Ok(())
         }
-        CliCommand::PlayFile { path, selectors } => {
-            facade.play_file(&path, &selectors)?;
+        CliCommand::PlayFile {
+            path,
+            selectors,
+            codec_preference,
+        } => {
+            facade.play_file_with_codec_preference(&path, &selectors, codec_preference)?;
             print_play_file_completed(&path, &selectors);
             Ok(())
         }
-        CliCommand::PlayCapture { selectors } => {
-            let session = facade.play_capture(&selectors)?;
+        CliCommand::PlayCapture {
+            selectors,
+            codec_preference,
+        } => {
+            let session =
+                facade.play_capture_with_codec_preference(&selectors, codec_preference)?;
             print_play_capture_started(&selectors);
             match wait_for_ctrl_c_or_capture_end(&session)? {
                 CaptureExit::UserRequestedStop => {

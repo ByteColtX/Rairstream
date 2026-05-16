@@ -1,5 +1,4 @@
-use crate::audio::AudioFormat;
-use crate::crypto::CipherSuite;
+use crate::audio::{AudioFormat, SendCodec, SendCodecPreference};
 use crate::receiver::{AuthMethod, CodecKind, Receiver, SupportLevel, TransportProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +17,7 @@ pub enum PlannedTiming {
 pub struct SessionPlan {
     pub receiver_id: String,
     pub transport: PlannedTransport,
-    pub codec: CipherSuite,
+    pub codec: SendCodec,
     pub input_format: AudioFormat,
     pub timing: PlannedTiming,
     pub auth_method: AuthMethod,
@@ -27,22 +26,20 @@ pub struct SessionPlan {
 
 #[must_use]
 pub fn plan_session(receiver: &Receiver, input_format: AudioFormat) -> SessionPlan {
+    plan_session_with_codec_preference(receiver, input_format, SendCodecPreference::Auto)
+}
+
+#[must_use]
+pub fn plan_session_with_codec_preference(
+    receiver: &Receiver,
+    input_format: AudioFormat,
+    codec_preference: SendCodecPreference,
+) -> SessionPlan {
     let transport = match receiver.transport_profile {
         TransportProfile::Raop => PlannedTransport::Raop,
         TransportProfile::ModernAuthRaop => PlannedTransport::AirPlay2,
     };
-    let codec = match receiver
-        .capabilities
-        .codecs
-        .first()
-        .copied()
-        .unwrap_or(CodecKind::L16)
-    {
-        CodecKind::L16 => CipherSuite::L16,
-        CodecKind::Alac => CipherSuite::Alac,
-        CodecKind::Aac => CipherSuite::Aac,
-        CodecKind::AacEld => CipherSuite::AacEld,
-    };
+    let codec = select_send_codec(receiver, codec_preference);
 
     SessionPlan {
         receiver_id: receiver.id.clone(),
@@ -58,5 +55,15 @@ pub fn plan_session(receiver: &Receiver, input_format: AudioFormat) -> SessionPl
         },
         auth_method: receiver.auth_method,
         support_level: receiver.support_level.clone(),
+    }
+}
+
+#[must_use]
+pub fn select_send_codec(receiver: &Receiver, codec_preference: SendCodecPreference) -> SendCodec {
+    let supports_alac = receiver.capabilities.codecs.contains(&CodecKind::Alac);
+    if codec_preference != SendCodecPreference::PcmL16 && supports_alac {
+        SendCodec::Alac
+    } else {
+        SendCodec::PcmL16
     }
 }

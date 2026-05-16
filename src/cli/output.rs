@@ -852,7 +852,7 @@ mod tests {
         assert!(rendered.contains("Commands"));
         assert!(rendered.contains("Options"));
         assert!(rendered.contains("-h, --help"));
-        assert!(rendered.contains("play capture --device <selector>..."));
+        assert!(rendered.contains("play capture [--codec <auto|pcm|alac>] --device <selector>..."));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::mem;
 
+use alac_encoder::{AlacEncoder, FormatDescription};
 use num_traits::ToPrimitive;
 
 use super::{AudioChunk, AudioFormat, AudioSampleType};
@@ -20,6 +21,38 @@ const CENTER_MIX_GAIN: f64 = FRAC_1_SQRT_2;
 const SURROUND_MIX_GAIN: f64 = 0.5;
 const LFE_MIX_GAIN: f64 = 0.5;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendCodec {
+    PcmL16,
+    Alac,
+}
+
+impl SendCodec {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PcmL16 => "pcm_l16",
+            Self::Alac => "alac",
+        }
+    }
+
+    #[must_use]
+    pub fn description(self, frames_per_packet: usize) -> CodecDescription {
+        match self {
+            Self::PcmL16 => CodecDescription::pcm_stereo(),
+            Self::Alac => CodecDescription::alac_stereo(frames_per_packet),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SendCodecPreference {
+    #[default]
+    Auto,
+    PcmL16,
+    Alac,
+}
+
 /// 经典 `RAOP` 发送端使用的固定音频描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodecDescription {
@@ -36,6 +69,121 @@ impl CodecDescription {
             rtpmap: "L16/44100/2",
             fmtp: None,
         }
+    }
+
+    #[must_use]
+    pub fn alac_stereo(frames_per_packet: usize) -> Self {
+        Self {
+            encoding_name: "AppleLossless",
+            rtpmap: "AppleLossless",
+            fmtp: Some(format!(
+                "96 {frames_per_packet} 0 16 40 10 14 2 255 0 0 {RAOP_SAMPLE_RATE_HZ}"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaopAudioPayload {
+    pub frames: usize,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct RaopPayloadEncoder {
+    codec: SendCodec,
+    frames_per_packet: usize,
+    alac: Option<AlacPacketEncoder>,
+}
+
+impl RaopPayloadEncoder {
+    #[must_use]
+    pub fn new(codec: SendCodec, frames_per_packet: usize) -> Self {
+        let alac = (codec == SendCodec::Alac).then(|| AlacPacketEncoder::new(frames_per_packet));
+        Self {
+            codec,
+            frames_per_packet,
+            alac,
+        }
+    }
+
+    pub fn encode_pcm_packet(
+        &mut self,
+        pcm_packet: &[u8],
+    ) -> Result<RaopAudioPayload, AirPlayError> {
+        let frames =
+            pcm_packet.len() / usize::from(RAOP_CHANNELS) / usize::from(RAOP_BITS_PER_SAMPLE / 8);
+        if frames != self.frames_per_packet {
+            return Err(AirPlayError::UnsupportedAudioFormat {
+                message: format!(
+                    "RAOP packet contained {frames} frames, expected {}",
+                    self.frames_per_packet
+                ),
+            });
+        }
+
+        let bytes = match self.codec {
+            SendCodec::PcmL16 => pcm_packet.to_vec(),
+            SendCodec::Alac => self
+                .alac
+                .as_mut()
+                .expect("ALAC codec must initialize an ALAC encoder")
+                .encode_be_pcm16(pcm_packet),
+        };
+
+        Ok(RaopAudioPayload { frames, bytes })
+    }
+}
+
+struct AlacPacketEncoder {
+    input_format: FormatDescription,
+    encoder: AlacEncoder,
+    output: Vec<u8>,
+    pcm_le: Vec<u8>,
+}
+
+impl std::fmt::Debug for AlacPacketEncoder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AlacPacketEncoder")
+            .field("output_capacity", &self.output.len())
+            .field("pcm_buffer_capacity", &self.pcm_le.capacity())
+            .finish_non_exhaustive()
+    }
+}
+
+impl AlacPacketEncoder {
+    fn new(frames_per_packet: usize) -> Self {
+        let frames_per_packet = u32::try_from(frames_per_packet)
+            .expect("RAOP frames per packet must fit in the ALAC encoder frame size");
+        let input_format =
+            FormatDescription::pcm::<i16>(f64::from(RAOP_SAMPLE_RATE_HZ), u32::from(RAOP_CHANNELS));
+        let output_format = FormatDescription::alac(
+            f64::from(RAOP_SAMPLE_RATE_HZ),
+            frames_per_packet,
+            u32::from(RAOP_CHANNELS),
+        );
+        let output = vec![0_u8; output_format.max_packet_size()];
+        Self {
+            input_format,
+            encoder: AlacEncoder::new(&output_format),
+            output,
+            pcm_le: Vec::new(),
+        }
+    }
+
+    fn encode_be_pcm16(&mut self, pcm_be: &[u8]) -> Vec<u8> {
+        self.pcm_le.clear();
+        self.pcm_le.reserve(pcm_be.len());
+        for sample in pcm_be.chunks_exact(2) {
+            let value = i16::from_be_bytes([sample[0], sample[1]]);
+            self.pcm_le.extend_from_slice(&value.to_le_bytes());
+        }
+
+        let size = self
+            .encoder
+            .encode(&self.input_format, &self.pcm_le, &mut self.output);
+        self.output[..size].to_vec()
     }
 }
 
@@ -446,7 +594,8 @@ fn quantize_sample(sample: f64) -> i16 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioResampler, CodecDescription, decode_and_downmix, encode_pcm_packet, protect_peak,
+        AudioResampler, CodecDescription, RaopPayloadEncoder, SendCodec, decode_and_downmix,
+        encode_pcm_packet, protect_peak,
     };
     use crate::audio::{AudioChunk, AudioFormat, AudioSampleType};
     use crate::config::MAX_SENDER_VOLUME_PERCENT;
@@ -467,6 +616,18 @@ mod tests {
         assert_eq!(codec.encoding_name, "L16");
         assert_eq!(codec.rtpmap, "L16/44100/2");
         assert!(codec.fmtp.is_none());
+    }
+
+    #[test]
+    fn alac_codec_description_matches_raop_stereo_profile() {
+        let codec = CodecDescription::alac_stereo(352);
+
+        assert_eq!(codec.encoding_name, "AppleLossless");
+        assert_eq!(codec.rtpmap, "AppleLossless");
+        assert_eq!(
+            codec.fmtp.as_deref(),
+            Some("96 352 0 16 40 10 14 2 255 0 0 44100")
+        );
     }
 
     #[test]
@@ -946,6 +1107,18 @@ mod tests {
         assert_eq!(bytes.len(), 4);
         assert!(bytes[0] != 0 || bytes[1] != 0);
         assert!(bytes[2] != 0 || bytes[3] != 0);
+    }
+
+    #[test]
+    fn alac_payload_encoder_outputs_compressed_frame_with_pcm_timeline() {
+        let pcm = encode_pcm_packet(&vec![[0.0, 0.0]; 352]);
+        let mut encoder = RaopPayloadEncoder::new(SendCodec::Alac, 352);
+
+        let payload = encoder.encode_pcm_packet(&pcm).unwrap();
+
+        assert_eq!(payload.frames, 352);
+        assert!(!payload.bytes.is_empty());
+        assert!(payload.bytes.len() < pcm.len());
     }
 
     #[test]

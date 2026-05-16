@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::audio::SendCodecPreference;
 use crate::config::{
     AppConfig, CachedReceiver, ConfigError, TrayLanguagePreference, default_config_path,
     load_config, save_config,
@@ -10,7 +11,8 @@ use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::{Receiver, selector};
 use crate::session::{
-    PlaybackSession, pair_receiver_with_pin, play_capture, play_file,
+    PlaybackSession, pair_receiver_with_pin, play_capture_with_codec_preference,
+    play_file_with_codec_preference,
     request_pairing_pin_display as session_request_pairing_pin_display,
 };
 use crate::storage::{paired_devices, receiver_cache};
@@ -217,16 +219,26 @@ where
     }
 
     pub fn play_file(&mut self, path: &Path, selectors: &[String]) -> Result<(), RairstreamError> {
+        self.play_file_with_codec_preference(path, selectors, SendCodecPreference::Auto)
+    }
+
+    pub fn play_file_with_codec_preference(
+        &mut self,
+        path: &Path,
+        selectors: &[String],
+        codec_preference: SendCodecPreference,
+    ) -> Result<(), RairstreamError> {
         let receivers = self.ensure_receivers()?;
         let targets = selector::resolve_receivers(&receivers, selectors)?;
         self.state.session = SessionState::Streaming {
             receiver_ids: targets.iter().map(|receiver| receiver.id.clone()).collect(),
         };
-        let result = play_file(
+        let result = play_file_with_codec_preference(
             path,
             &targets,
             &self.config.paired_receivers,
             self.config.sender_volume_percent,
+            codec_preference,
         );
         self.state.session = SessionState::Idle;
         result
@@ -236,15 +248,24 @@ where
         &mut self,
         selectors: &[String],
     ) -> Result<PlaybackSession, RairstreamError> {
+        self.play_capture_with_codec_preference(selectors, SendCodecPreference::Auto)
+    }
+
+    pub fn play_capture_with_codec_preference(
+        &mut self,
+        selectors: &[String],
+        codec_preference: SendCodecPreference,
+    ) -> Result<PlaybackSession, RairstreamError> {
         let receivers = self.ensure_receivers()?;
         let targets = selector::resolve_receivers(&receivers, selectors)?;
         self.state.session = SessionState::Streaming {
             receiver_ids: targets.iter().map(|receiver| receiver.id.clone()).collect(),
         };
-        match play_capture(
+        match play_capture_with_codec_preference(
             &targets,
             &self.config.paired_receivers,
             self.config.sender_volume_percent,
+            codec_preference,
         ) {
             Ok(session) => Ok(session),
             Err(error) => {

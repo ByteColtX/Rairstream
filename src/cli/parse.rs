@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::audio::SendCodecPreference;
 use crate::error::RairstreamError;
 
 pub(crate) const CLI_USAGE: &str =
@@ -14,8 +15,8 @@ pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
     "pair --device <selector> [--pin <PIN>]",
     "paired list",
     "paired forget --device <selector>",
-    "play file <path> --device <selector>...",
-    "play capture --device <selector>...",
+    "play file <path> [--codec <auto|pcm|alac>] --device <selector>...",
+    "play capture [--codec <auto|pcm|alac>] --device <selector>...",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,9 +37,11 @@ pub enum CliCommand {
     PlayFile {
         path: PathBuf,
         selectors: Vec<String>,
+        codec_preference: SendCodecPreference,
     },
     PlayCapture {
         selectors: Vec<String>,
+        codec_preference: SendCodecPreference,
     },
 }
 
@@ -169,14 +172,20 @@ fn parse_play_command(args: &[String]) -> Result<CliCommand, RairstreamError> {
             let Some((path, selectors)) = tail.split_first() else {
                 return Err(usage_error());
             };
+            let (selectors, codec_preference) = parse_play_options(selectors)?;
             Ok(CliCommand::PlayFile {
                 path: PathBuf::from(path),
-                selectors: parse_device_selectors(selectors)?,
+                selectors,
+                codec_preference,
             })
         }
-        "capture" => Ok(CliCommand::PlayCapture {
-            selectors: parse_device_selectors(tail)?,
-        }),
+        "capture" => {
+            let (selectors, codec_preference) = parse_play_options(tail)?;
+            Ok(CliCommand::PlayCapture {
+                selectors,
+                codec_preference,
+            })
+        }
         _ => Err(usage_error()),
     }
 }
@@ -224,23 +233,38 @@ fn normalize_cli_text(value: &str, label: &str) -> Result<String, RairstreamErro
     Ok(value.to_string())
 }
 
-fn parse_device_selectors(args: &[String]) -> Result<Vec<String>, RairstreamError> {
+fn parse_play_options(
+    args: &[String],
+) -> Result<(Vec<String>, SendCodecPreference), RairstreamError> {
     let mut selectors = Vec::new();
+    let mut codec_preference = SendCodecPreference::Auto;
     let mut index = 0;
     while index < args.len() {
-        if args[index] != "--device" {
-            return Err(RairstreamError::InvalidCli {
-                message: format!("unexpected argument `{}`", args[index]),
-            });
+        match args[index].as_str() {
+            "--device" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| RairstreamError::InvalidCli {
+                        message: String::from("--device requires a value"),
+                    })?;
+                selectors.push(normalize_cli_text(value, "selector")?);
+                index += 2;
+            }
+            "--codec" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| RairstreamError::InvalidCli {
+                        message: String::from("--codec requires a value"),
+                    })?;
+                codec_preference = parse_codec_preference(value)?;
+                index += 2;
+            }
+            unexpected => {
+                return Err(RairstreamError::InvalidCli {
+                    message: format!("unexpected argument `{unexpected}`"),
+                });
+            }
         }
-
-        let value = args
-            .get(index + 1)
-            .ok_or_else(|| RairstreamError::InvalidCli {
-                message: String::from("--device requires a value"),
-            })?;
-        selectors.push(normalize_cli_text(value, "selector")?);
-        index += 2;
     }
 
     if selectors.is_empty() {
@@ -249,7 +273,18 @@ fn parse_device_selectors(args: &[String]) -> Result<Vec<String>, RairstreamErro
         });
     }
 
-    Ok(selectors)
+    Ok((selectors, codec_preference))
+}
+
+fn parse_codec_preference(value: &str) -> Result<SendCodecPreference, RairstreamError> {
+    match value {
+        "auto" => Ok(SendCodecPreference::Auto),
+        "pcm" | "pcm_l16" | "l16" => Ok(SendCodecPreference::PcmL16),
+        "alac" => Ok(SendCodecPreference::Alac),
+        _ => Err(RairstreamError::InvalidCli {
+            message: format!("unsupported codec `{value}`"),
+        }),
+    }
 }
 
 fn usage_error() -> RairstreamError {
