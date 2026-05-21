@@ -33,3 +33,27 @@ fn paired_credentials_round_trip_through_config_file() {
     assert_eq!(loaded.paired_receivers.len(), 1);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn auto_reconnect_round_trips_through_config_file() {
+    let path = temp_config_path();
+    let mut config = AppConfig::default();
+    config.set_auto_reconnect(true);
+
+    save_config(&path, &config).unwrap();
+    let loaded = load_config(&path).unwrap();
+
+    assert!(loaded.auto_reconnect);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn missing_auto_reconnect_defaults_to_disabled() {
+    let path = temp_config_path();
+    std::fs::write(&path, r#"{"sender_volume_percent":100}"#).unwrap();
+
+    let loaded = load_config(&path).unwrap();
+
+    assert!(!loaded.auto_reconnect);
+    let _ = std::fs::remove_file(path);
+}
