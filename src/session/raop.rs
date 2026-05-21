@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{AirPlayError, SessionDescriptor};
-use crate::audio::{CodecDescription, RAOP_STARTUP_LATENCY_FRAMES};
+use crate::audio::RAOP_STARTUP_LATENCY_FRAMES;
 use crate::rtsp::client::{
     compute_rtsp_keepalive_interval, ensure_success, format_response_status, map_connection_error,
 };
@@ -14,6 +14,7 @@ use crate::rtsp::{
     RtspResponse, SetupReply, SetupTransport, build_announce_request, build_options_request,
     build_record_request, build_setup_request, build_teardown_request, parse_setup_reply,
 };
+use crate::session::select_send_codec;
 use crate::timing::raop::TimingResponder;
 use crate::transport::{RaopPacketCounters, RaopSinkConfig};
 use tracing::{debug, info};
@@ -110,7 +111,6 @@ impl Drop for RaopConnection {
 pub struct RaopSession {
     descriptor: SessionDescriptor,
     sink_config: RaopSinkConfig,
-    codec: CodecDescription,
     state: RaopSessionState,
     cseq: u32,
     setup_reply: Option<SetupReply>,
@@ -142,14 +142,17 @@ impl RaopSession {
             "creating RAOP session"
         );
 
+        let send_codec = select_send_codec(&descriptor.device, descriptor.send_codec_preference);
+        debug!(send_codec = send_codec.as_str(), "selected RAOP send codec");
+
         Ok(Self {
             descriptor: descriptor.clone(),
             sink_config: RaopSinkConfig {
+                codec: send_codec,
                 frames_per_packet: descriptor.frames_per_packet,
                 sender_volume_percent: descriptor.sender_volume_percent,
                 ..RaopSinkConfig::default()
             },
-            codec: CodecDescription::pcm_stereo(),
             state: RaopSessionState::Connecting,
             cseq: 0,
             setup_reply: None,
@@ -324,7 +327,14 @@ impl RaopSession {
     #[must_use]
     pub fn announce_request(&mut self) -> RtspRequest {
         let cseq = self.next_cseq();
-        build_announce_request(&self.descriptor, cseq, &self.codec)
+        build_announce_request(
+            &self.descriptor,
+            cseq,
+            &self
+                .sink_config
+                .codec
+                .description(self.sink_config.frames_per_packet),
+        )
     }
 
     #[must_use]

@@ -7,15 +7,21 @@ pub(crate) mod transport;
 
 use std::fmt::Write;
 
-use crate::audio::AudioFormat;
+use crate::audio::{AudioFormat, SendCodecPreference};
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
 use thiserror::Error;
 
 pub use connect::{pair_receiver_with_pin, request_pairing_pin_display};
-pub use planner::{PlannedTiming, PlannedTransport, SessionPlan, plan_session};
+pub use planner::{
+    PlannedTiming, PlannedTransport, SessionPlan, plan_session, plan_session_with_codec_preference,
+    select_send_codec,
+};
 pub use raop::{RaopConnection, RaopSession, RaopSessionState};
-pub use stream::{PlaybackSession, play_capture, play_file};
+pub use stream::{
+    PlaybackSession, play_capture, play_capture_with_codec_preference, play_file,
+    play_file_with_codec_preference,
+};
 pub use transport::{
     ModernAirPlayConnection, ModernAirPlaySession, PreparedSession, SessionConnection,
 };
@@ -27,6 +33,7 @@ pub struct SessionDescriptor {
     pub input_format: AudioFormat,
     pub frames_per_packet: usize,
     pub sender_volume_percent: u16,
+    pub send_codec_preference: SendCodecPreference,
     pub receiver_credentials: Option<ReceiverCredentials>,
 }
 
@@ -38,6 +45,7 @@ impl SessionDescriptor {
             input_format,
             frames_per_packet: crate::audio::RAOP_FRAMES_PER_PACKET,
             sender_volume_percent: 100,
+            send_codec_preference: SendCodecPreference::Auto,
             receiver_credentials: None,
         }
     }

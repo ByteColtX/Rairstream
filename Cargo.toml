@@ -18,6 +18,7 @@ pre-release-commit-message = "chore: release {{crate_name}} {{version}}"
 [dependencies]
 aes = "0.8.4"
 aes-gcm = "0.10.3"
+alac-encoder = "0.3.0"
 anyhow = "1.0.100"
 base64ct = { version = "1.8.3", features = ["alloc"] }
 chacha20poly1305 = "0.10.1"

@@ -4,13 +4,17 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::audio::{AudioChunk, CaptureConfig, FileChunkDecoder};
+use crate::audio::{AudioChunk, CaptureConfig, FileChunkDecoder, SendCodecPreference};
 use crate::capture::WindowsLoopbackCapture;
 use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
 
-use super::connect::{ConnectedReceiver, build_group_sink, connect_receivers};
+#[cfg(test)]
+use super::connect::connect_receivers;
+use super::connect::{
+    ConnectedReceiver, build_group_sink, connect_receivers_with_codec_preference,
+};
 
 pub struct PlaybackSession {
     connections: Vec<ConnectedReceiver>,
@@ -44,9 +48,31 @@ pub fn play_capture<S>(
 where
     S: BuildHasher,
 {
+    play_capture_with_codec_preference(
+        receivers,
+        paired_receivers,
+        sender_volume_percent,
+        SendCodecPreference::Auto,
+    )
+}
+
+pub fn play_capture_with_codec_preference<S>(
+    receivers: &[Receiver],
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
+    sender_volume_percent: u16,
+    codec_preference: SendCodecPreference,
+) -> Result<PlaybackSession, RairstreamError>
+where
+    S: BuildHasher,
+{
     let format = WindowsLoopbackCapture::preferred_format()?;
-    let connections =
-        connect_receivers(receivers, format, paired_receivers, sender_volume_percent)?;
+    let connections = connect_receivers_with_codec_preference(
+        receivers,
+        format,
+        paired_receivers,
+        sender_volume_percent,
+        codec_preference,
+    )?;
     let sink = match build_group_sink(&connections, format, sender_volume_percent) {
         Ok(sink) => sink,
         Err(error) => {
@@ -75,6 +101,25 @@ pub fn play_file<S>(
 where
     S: BuildHasher,
 {
+    play_file_with_codec_preference(
+        path,
+        receivers,
+        paired_receivers,
+        sender_volume_percent,
+        SendCodecPreference::Auto,
+    )
+}
+
+pub fn play_file_with_codec_preference<S>(
+    path: &Path,
+    receivers: &[Receiver],
+    paired_receivers: &HashMap<String, ReceiverCredentials, S>,
+    sender_volume_percent: u16,
+    codec_preference: SendCodecPreference,
+) -> Result<(), RairstreamError>
+where
+    S: BuildHasher,
+{
     let mut decoder = FileChunkDecoder::open(path)?;
     let Some(first_chunk) = decoder.next_chunk()? else {
         return Err(RairstreamError::InvalidInput {
@@ -84,11 +129,12 @@ where
             ),
         });
     };
-    let connections = connect_receivers(
+    let connections = connect_receivers_with_codec_preference(
         receivers,
         first_chunk.format,
         paired_receivers,
         sender_volume_percent,
+        codec_preference,
     )?;
     let mut sink = match build_group_sink(&connections, first_chunk.format, sender_volume_percent) {
         Ok(sink) => sink,

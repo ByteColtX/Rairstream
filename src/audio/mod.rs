@@ -14,8 +14,11 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 
 pub use decode::FileChunkDecoder;
-pub use raop::AudioResampler;
-pub(crate) use raop::{CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES};
+pub use raop::{AudioResampler, SendCodec, SendCodecPreference};
+pub(crate) use raop::{
+    CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES, RaopAudioPayload,
+    RaopPayloadEncoder,
+};
 #[cfg(test)]
 pub(crate) use raop::{RAOP_SAMPLE_RATE_HZ, RAOP_STARTUP_LATENCY_MILLIS};
 
