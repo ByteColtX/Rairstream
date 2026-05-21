@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{AirPlayError, SessionDescriptor};
-use crate::audio::{CodecDescription, RAOP_STARTUP_LATENCY_FRAMES};
+use crate::audio::CodecDescription;
 use crate::rtsp::client::{
     compute_rtsp_keepalive_interval, ensure_success, format_response_status, map_connection_error,
 };
@@ -126,6 +126,8 @@ impl RaopSession {
 
     pub fn connect(descriptor: &SessionDescriptor) -> Result<Self, AirPlayError> {
         descriptor.validate()?;
+        let latency_profile = descriptor.latency_profile;
+        let buffer_frames = latency_profile.buffer_frames();
         let (initial_sequence, initial_timestamp, audio_ssrc) = build_rtp_session_seed(descriptor);
         debug!(
             device_id = %descriptor.device.id,
@@ -139,6 +141,9 @@ impl RaopSession {
             initial_sequence,
             initial_timestamp,
             audio_ssrc,
+            requested_buffer_ms = latency_profile.buffer_ms(),
+            requested_buffer_frames = buffer_frames,
+            latency_profile = ?latency_profile.kind(),
             "creating RAOP session"
         );
 
@@ -411,6 +416,7 @@ fn build_rtp_session_seed(descriptor: &SessionDescriptor) -> (u16, u32, u32) {
     let initial_sequence = u16::try_from(hash & 0xffff_u64).unwrap_or(1).max(1);
     let initial_timestamp = apply_startup_latency_offset(
         u32::try_from((hash >> 16) & 0xffff_ffff_u64).unwrap_or_default(),
+        descriptor.latency_profile.buffer_frames(),
     );
     let audio_ssrc = u32::try_from((hash >> 8) & 0xffff_ffff_u64)
         .unwrap_or(1)
@@ -419,8 +425,8 @@ fn build_rtp_session_seed(descriptor: &SessionDescriptor) -> (u16, u32, u32) {
     (initial_sequence, initial_timestamp, audio_ssrc)
 }
 
-const fn apply_startup_latency_offset(base_timestamp: u32) -> u32 {
-    base_timestamp.wrapping_add(RAOP_STARTUP_LATENCY_FRAMES)
+const fn apply_startup_latency_offset(base_timestamp: u32, startup_latency_frames: u32) -> u32 {
+    base_timestamp.wrapping_add(startup_latency_frames)
 }
 
 fn hash_identifier_segment(hash: &mut u64, bytes: &[u8]) {
@@ -523,6 +529,17 @@ mod tests {
     }
 
     #[test]
+    fn connect_preserves_realtime_packet_size_in_sink_config() {
+        let mut descriptor = build_descriptor(AudioFormat::default());
+        descriptor.latency_profile = crate::session::LatencyProfile::realtime();
+        descriptor.frames_per_packet = descriptor.latency_profile.frames_per_packet();
+
+        let session = RaopSession::connect(&descriptor).unwrap();
+
+        assert_eq!(session.sink_config().frames_per_packet, 128);
+    }
+
+    #[test]
     fn connect_rejects_out_of_range_sender_volume_percent() {
         let mut descriptor = build_descriptor(AudioFormat::default());
         descriptor.sender_volume_percent = 401;
@@ -573,19 +590,19 @@ mod tests {
     #[test]
     fn startup_latency_offset_adds_raop_baseline_to_timestamp_seed() {
         assert_eq!(
-            super::apply_startup_latency_offset(0),
+            super::apply_startup_latency_offset(0, RAOP_STARTUP_LATENCY_FRAMES),
             RAOP_STARTUP_LATENCY_FRAMES
         );
         assert_eq!(
-            super::apply_startup_latency_offset(1_000),
+            super::apply_startup_latency_offset(1_000, RAOP_STARTUP_LATENCY_FRAMES),
             1_000 + RAOP_STARTUP_LATENCY_FRAMES
         );
     }
 
     #[test]
     fn startup_latency_offset_preserves_timestamp_distance_from_baseline() {
-        let baseline = super::apply_startup_latency_offset(0);
-        let advanced = super::apply_startup_latency_offset(12_345);
+        let baseline = super::apply_startup_latency_offset(0, RAOP_STARTUP_LATENCY_FRAMES);
+        let advanced = super::apply_startup_latency_offset(12_345, RAOP_STARTUP_LATENCY_FRAMES);
 
         assert_eq!(advanced - baseline, 12_345);
     }
@@ -593,7 +610,10 @@ mod tests {
     #[test]
     fn startup_latency_offset_reaches_u32_max_at_exact_rollover_threshold() {
         assert_eq!(
-            super::apply_startup_latency_offset(u32::MAX - RAOP_STARTUP_LATENCY_FRAMES),
+            super::apply_startup_latency_offset(
+                u32::MAX - RAOP_STARTUP_LATENCY_FRAMES,
+                RAOP_STARTUP_LATENCY_FRAMES
+            ),
             u32::MAX
         );
     }
@@ -601,7 +621,10 @@ mod tests {
     #[test]
     fn startup_latency_offset_wraps_to_zero_after_rollover_threshold() {
         assert_eq!(
-            super::apply_startup_latency_offset(u32::MAX - RAOP_STARTUP_LATENCY_FRAMES + 1),
+            super::apply_startup_latency_offset(
+                u32::MAX - RAOP_STARTUP_LATENCY_FRAMES + 1,
+                RAOP_STARTUP_LATENCY_FRAMES
+            ),
             0
         );
     }
@@ -609,9 +632,15 @@ mod tests {
     #[test]
     fn startup_latency_offset_wraps_at_u32_boundary() {
         assert_eq!(
-            super::apply_startup_latency_offset(u32::MAX),
+            super::apply_startup_latency_offset(u32::MAX, RAOP_STARTUP_LATENCY_FRAMES),
             RAOP_STARTUP_LATENCY_FRAMES - 1
         );
+    }
+
+    #[test]
+    fn startup_latency_offset_uses_requested_buffer_frames() {
+        assert_eq!(super::apply_startup_latency_offset(1_000, 4_410), 5_410);
+        assert_eq!(super::apply_startup_latency_offset(1_000, 0), 1_000);
     }
 
     #[test]

@@ -7,7 +7,7 @@ pub(crate) mod transport;
 
 use std::fmt::Write;
 
-use crate::audio::AudioFormat;
+use crate::audio::{AudioFormat, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ};
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
 use thiserror::Error;
@@ -27,6 +27,7 @@ pub struct SessionDescriptor {
     pub input_format: AudioFormat,
     pub frames_per_packet: usize,
     pub sender_volume_percent: u16,
+    pub latency_profile: LatencyProfile,
     pub receiver_credentials: Option<ReceiverCredentials>,
 }
 
@@ -38,6 +39,7 @@ impl SessionDescriptor {
             input_format,
             frames_per_packet: crate::audio::RAOP_FRAMES_PER_PACKET,
             sender_volume_percent: 100,
+            latency_profile: LatencyProfile::safe(),
             receiver_credentials: None,
         }
     }
@@ -108,6 +110,96 @@ impl SessionDescriptor {
     }
 }
 
+/// User-facing RAOP startup buffer profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LatencyProfile {
+    kind: LatencyProfileKind,
+    buffer_ms: u32,
+    frames_per_packet: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatencyProfileKind {
+    Safe,
+    Normal,
+    Low,
+    Realtime,
+    Custom,
+}
+
+impl LatencyProfile {
+    #[must_use]
+    pub const fn safe() -> Self {
+        Self {
+            kind: LatencyProfileKind::Safe,
+            buffer_ms: crate::audio::RAOP_STARTUP_LATENCY_MILLIS,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
+        }
+    }
+
+    #[must_use]
+    pub const fn normal() -> Self {
+        Self {
+            kind: LatencyProfileKind::Normal,
+            buffer_ms: 150,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
+        }
+    }
+
+    #[must_use]
+    pub const fn low() -> Self {
+        Self {
+            kind: LatencyProfileKind::Low,
+            buffer_ms: 100,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
+        }
+    }
+
+    #[must_use]
+    pub const fn realtime() -> Self {
+        Self {
+            kind: LatencyProfileKind::Realtime,
+            buffer_ms: 50,
+            frames_per_packet: 128,
+        }
+    }
+
+    #[must_use]
+    pub const fn custom(buffer_ms: u32) -> Self {
+        Self::custom_with_packet_frames(buffer_ms, RAOP_FRAMES_PER_PACKET)
+    }
+
+    #[must_use]
+    pub const fn custom_with_packet_frames(buffer_ms: u32, frames_per_packet: usize) -> Self {
+        Self {
+            kind: LatencyProfileKind::Custom,
+            buffer_ms,
+            frames_per_packet,
+        }
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> LatencyProfileKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub const fn buffer_ms(self) -> u32 {
+        self.buffer_ms
+    }
+
+    #[must_use]
+    pub fn buffer_frames(self) -> u32 {
+        let frames = u64::from(self.buffer_ms) * u64::from(RAOP_SAMPLE_RATE_HZ) / 1_000;
+        u32::try_from(frames).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub const fn frames_per_packet(self) -> usize {
+        self.frames_per_packet
+    }
+}
+
 fn hash_identifier_segment(hash: &mut u64, bytes: &[u8]) {
     for byte in bytes {
         *hash ^= u64::from(*byte);
@@ -163,7 +255,7 @@ pub enum AirPlayError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AirPlayError, SessionDescriptor};
+    use super::{AirPlayError, LatencyProfile, LatencyProfileKind, SessionDescriptor};
     use crate::audio::AudioFormat;
     use crate::audio::{
         CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ, RAOP_STARTUP_LATENCY_FRAMES,
@@ -196,6 +288,7 @@ mod tests {
 
         assert_eq!(descriptor.frames_per_packet, RAOP_FRAMES_PER_PACKET);
         assert_eq!(descriptor.sender_volume_percent, 100);
+        assert_eq!(descriptor.latency_profile, LatencyProfile::safe());
     }
 
     #[test]
@@ -290,6 +383,57 @@ mod tests {
         assert_eq!(
             RAOP_STARTUP_LATENCY_MILLIS,
             RAOP_STARTUP_LATENCY_FRAMES * 1_000 / RAOP_SAMPLE_RATE_HZ
+        );
+    }
+
+    #[test]
+    fn latency_profiles_convert_millis_to_raop_frames() {
+        assert_eq!(LatencyProfile::safe().buffer_ms(), 250);
+        assert_eq!(LatencyProfile::safe().buffer_frames(), 11_025);
+        assert_eq!(LatencyProfile::normal().buffer_frames(), 6_615);
+        assert_eq!(LatencyProfile::low().buffer_frames(), 4_410);
+        assert_eq!(LatencyProfile::realtime().buffer_frames(), 2_205);
+        assert_eq!(LatencyProfile::custom(0).buffer_frames(), 0);
+        assert_eq!(LatencyProfile::custom(123).buffer_frames(), 5_424);
+    }
+
+    #[test]
+    fn latency_profiles_report_kind() {
+        assert_eq!(LatencyProfile::safe().kind(), LatencyProfileKind::Safe);
+        assert_eq!(LatencyProfile::normal().kind(), LatencyProfileKind::Normal);
+        assert_eq!(LatencyProfile::low().kind(), LatencyProfileKind::Low);
+        assert_eq!(
+            LatencyProfile::realtime().kind(),
+            LatencyProfileKind::Realtime
+        );
+        assert_eq!(
+            LatencyProfile::custom(10).kind(),
+            LatencyProfileKind::Custom
+        );
+    }
+
+    #[test]
+    fn latency_profiles_select_packet_size() {
+        assert_eq!(
+            LatencyProfile::safe().frames_per_packet(),
+            RAOP_FRAMES_PER_PACKET
+        );
+        assert_eq!(
+            LatencyProfile::normal().frames_per_packet(),
+            RAOP_FRAMES_PER_PACKET
+        );
+        assert_eq!(
+            LatencyProfile::low().frames_per_packet(),
+            RAOP_FRAMES_PER_PACKET
+        );
+        assert_eq!(LatencyProfile::realtime().frames_per_packet(), 128);
+        assert_eq!(
+            LatencyProfile::custom(0).frames_per_packet(),
+            RAOP_FRAMES_PER_PACKET
+        );
+        assert_eq!(
+            LatencyProfile::custom_with_packet_frames(25, 64).frames_per_packet(),
+            64
         );
     }
 

@@ -7,7 +7,7 @@ use crate::config::MAX_SENDER_VOLUME_PERCENT;
 use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
-use crate::session::{PreparedSession, SessionConnection, SessionDescriptor};
+use crate::session::{LatencyProfile, PreparedSession, SessionConnection, SessionDescriptor};
 use crate::transport::RaopAudioSink;
 
 use super::group::FanoutAudioSink;
@@ -36,6 +36,7 @@ pub fn connect_receivers<S>(
     input_format: AudioFormat,
     paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
+    latency_profile: LatencyProfile,
 ) -> Result<Vec<ConnectedReceiver>, RairstreamError>
 where
     S: BuildHasher,
@@ -45,6 +46,8 @@ where
     for receiver in receivers {
         let mut descriptor = SessionDescriptor::new(receiver.clone(), input_format);
         descriptor.sender_volume_percent = sender_volume_percent;
+        descriptor.latency_profile = latency_profile;
+        descriptor.frames_per_packet = latency_profile.frames_per_packet();
         if let Some(credentials) = paired_receivers.get(&receiver.id).cloned() {
             descriptor = descriptor.with_receiver_credentials(credentials);
         }

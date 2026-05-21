@@ -13,6 +13,7 @@ pub(crate) const RAOP_CHANNELS: u16 = 2;
 pub(crate) const RAOP_BITS_PER_SAMPLE: u16 = 16;
 pub(crate) const RAOP_FRAMES_PER_PACKET: usize = 352;
 pub(crate) const RAOP_STARTUP_LATENCY_MILLIS: u32 = 250;
+#[cfg(test)]
 pub(crate) const RAOP_STARTUP_LATENCY_FRAMES: u32 =
     RAOP_STARTUP_LATENCY_MILLIS * RAOP_SAMPLE_RATE_HZ / 1_000;
 
@@ -44,6 +45,7 @@ impl CodecDescription {
 pub struct AudioResampler {
     source_format: AudioFormat,
     sender_volume_gain: f64,
+    frames_per_packet: usize,
     phase_numerator: u32,
     pending_input_frames: Vec<[f64; 2]>,
     pending_output_frames: Vec<[f64; 2]>,
@@ -60,9 +62,19 @@ impl AudioResampler {
         source_format: AudioFormat,
         sender_volume_percent: u16,
     ) -> Self {
+        Self::with_config(source_format, sender_volume_percent, RAOP_FRAMES_PER_PACKET)
+    }
+
+    #[must_use]
+    pub fn with_config(
+        source_format: AudioFormat,
+        sender_volume_percent: u16,
+        frames_per_packet: usize,
+    ) -> Self {
         let mut resampler = Self {
             source_format,
             sender_volume_gain: 1.0,
+            frames_per_packet: frames_per_packet.max(1),
             phase_numerator: 0,
             pending_input_frames: Vec::new(),
             pending_output_frames: Vec::new(),
@@ -105,7 +117,7 @@ impl AudioResampler {
 
         Ok(drain_pcm_packets(
             resampled_frames,
-            RAOP_FRAMES_PER_PACKET,
+            self.frames_per_packet,
             &mut self.pending_output_frames,
         ))
     }
@@ -680,6 +692,23 @@ mod tests {
 
         assert_eq!(packets.len(), 2);
         assert!(packets.iter().all(|packet| packet.len() == 352 * 4));
+    }
+
+    #[test]
+    fn resampler_uses_configured_frames_per_packet() {
+        let format = AudioFormat::default();
+        let mut resampler = AudioResampler::with_config(format, 100, 128);
+        let mut bytes = Vec::new();
+        for _ in 0..256 {
+            bytes.extend_from_slice(&1000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-1000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        let packets = resampler.push_chunk(&chunk).unwrap();
+
+        assert_eq!(packets.len(), 2);
+        assert!(packets.iter().all(|packet| packet.len() == 128 * 4));
     }
 
     #[test]

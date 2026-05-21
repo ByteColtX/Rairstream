@@ -10,6 +10,7 @@ use crate::error::RairstreamError;
 use crate::pairing::ReceiverCredentials;
 use crate::receiver::Receiver;
 
+use super::LatencyProfile;
 use super::connect::{ConnectedReceiver, build_group_sink, connect_receivers};
 
 pub struct PlaybackSession {
@@ -40,13 +41,19 @@ pub fn play_capture<S>(
     receivers: &[Receiver],
     paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
+    latency_profile: LatencyProfile,
 ) -> Result<PlaybackSession, RairstreamError>
 where
     S: BuildHasher,
 {
     let format = WindowsLoopbackCapture::preferred_format()?;
-    let connections =
-        connect_receivers(receivers, format, paired_receivers, sender_volume_percent)?;
+    let connections = connect_receivers(
+        receivers,
+        format,
+        paired_receivers,
+        sender_volume_percent,
+        latency_profile,
+    )?;
     let sink = match build_group_sink(&connections, format, sender_volume_percent) {
         Ok(sink) => sink,
         Err(error) => {
@@ -71,6 +78,7 @@ pub fn play_file<S>(
     receivers: &[Receiver],
     paired_receivers: &HashMap<String, ReceiverCredentials, S>,
     sender_volume_percent: u16,
+    latency_profile: LatencyProfile,
 ) -> Result<(), RairstreamError>
 where
     S: BuildHasher,
@@ -89,6 +97,7 @@ where
         first_chunk.format,
         paired_receivers,
         sender_volume_percent,
+        latency_profile,
     )?;
     let mut sink = match build_group_sink(&connections, first_chunk.format, sender_volume_percent) {
         Ok(sink) => sink,
@@ -221,7 +230,7 @@ mod tests {
     use crate::receiver::{
         AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
-    use crate::session::AirPlayError;
+    use crate::session::{AirPlayError, LatencyProfile};
 
     use super::{
         PlaybackSession, chunk_duration, combine_playback_results, connect_receivers, stream_chunks,
@@ -353,6 +362,7 @@ mod tests {
             AudioFormat::default(),
             &paired_receivers,
             100,
+            LatencyProfile::safe(),
         )
         .unwrap();
         let session = PlaybackSession {
