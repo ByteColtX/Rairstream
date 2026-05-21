@@ -15,8 +15,8 @@ pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
     "pair --device <selector> [--pin <PIN>]",
     "paired list",
     "paired forget --device <selector>",
-    "play file <path> --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>]",
-    "play capture --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>]",
+    "play file <path> --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>] [--packet-frames <frames>]",
+    "play capture --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>] [--packet-frames <frames>]",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +245,7 @@ fn parse_play_selectors_and_latency(
     let mut selectors = Vec::new();
     let mut latency_selection = None;
     let mut custom_buffer_ms = None;
+    let mut custom_packet_frames = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -271,6 +272,13 @@ fn parse_play_selectors_and_latency(
                 custom_buffer_ms = Some(parse_buffer_ms(value)?);
                 index += 2;
             }
+            "--packet-frames" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| missing_value_error("--packet-frames"))?;
+                custom_packet_frames = Some(parse_packet_frames(value)?);
+                index += 2;
+            }
             unexpected if unexpected.starts_with("--latency=") => {
                 latency_selection = Some(parse_latency_selection(
                     unexpected.trim_start_matches("--latency="),
@@ -280,6 +288,12 @@ fn parse_play_selectors_and_latency(
             unexpected if unexpected.starts_with("--buffer-ms=") => {
                 custom_buffer_ms = Some(parse_buffer_ms(
                     unexpected.trim_start_matches("--buffer-ms="),
+                )?);
+                index += 1;
+            }
+            unexpected if unexpected.starts_with("--packet-frames=") => {
+                custom_packet_frames = Some(parse_packet_frames(
+                    unexpected.trim_start_matches("--packet-frames="),
                 )?);
                 index += 1;
             }
@@ -297,15 +311,27 @@ fn parse_play_selectors_and_latency(
         });
     }
 
-    let latency_profile = match (latency_selection, custom_buffer_ms) {
-        (Some(LatencySelection::Custom), None) => {
+    let latency_profile = match (latency_selection, custom_buffer_ms, custom_packet_frames) {
+        (Some(LatencySelection::Custom), None, None) => {
             return Err(RairstreamError::InvalidCli {
-                message: String::from("--latency custom requires --buffer-ms <ms>"),
+                message: String::from(
+                    "--latency custom requires --buffer-ms <ms> or --packet-frames <frames>",
+                ),
             });
         }
-        (_, Some(buffer_ms)) => LatencyProfile::custom(buffer_ms),
-        (Some(LatencySelection::Profile(profile)), None) => profile,
-        (None, None) => LatencyProfile::safe(),
+        (_, Some(buffer_ms), packet_frames) => LatencyProfile::custom_with_packet_frames(
+            buffer_ms,
+            packet_frames.unwrap_or(crate::audio::RAOP_FRAMES_PER_PACKET),
+        ),
+        (_, None, Some(packet_frames)) => {
+            let buffer_ms = match latency_selection {
+                Some(LatencySelection::Profile(profile)) => profile.buffer_ms(),
+                Some(LatencySelection::Custom) | None => LatencyProfile::safe().buffer_ms(),
+            };
+            LatencyProfile::custom_with_packet_frames(buffer_ms, packet_frames)
+        }
+        (Some(LatencySelection::Profile(profile)), None, None) => profile,
+        (None, None, None) => LatencyProfile::safe(),
     };
 
     Ok((selectors, latency_profile))
@@ -330,6 +356,22 @@ fn parse_buffer_ms(value: &str) -> Result<u32, RairstreamError> {
         .map_err(|_| RairstreamError::InvalidCli {
             message: format!("--buffer-ms must be a non-negative integer, got `{value}`"),
         })
+}
+
+fn parse_packet_frames(value: &str) -> Result<usize, RairstreamError> {
+    let frames = value
+        .parse::<usize>()
+        .map_err(|_| RairstreamError::InvalidCli {
+            message: format!("--packet-frames must be a positive integer, got `{value}`"),
+        })?;
+
+    if frames == 0 {
+        return Err(RairstreamError::InvalidCli {
+            message: String::from("--packet-frames must be greater than 0"),
+        });
+    }
+
+    Ok(frames)
 }
 
 fn usage_error() -> RairstreamError {

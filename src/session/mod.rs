@@ -115,6 +115,7 @@ impl SessionDescriptor {
 pub struct LatencyProfile {
     kind: LatencyProfileKind,
     buffer_ms: u32,
+    frames_per_packet: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +133,7 @@ impl LatencyProfile {
         Self {
             kind: LatencyProfileKind::Safe,
             buffer_ms: crate::audio::RAOP_STARTUP_LATENCY_MILLIS,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
         }
     }
 
@@ -140,6 +142,7 @@ impl LatencyProfile {
         Self {
             kind: LatencyProfileKind::Normal,
             buffer_ms: 150,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
         }
     }
 
@@ -148,6 +151,7 @@ impl LatencyProfile {
         Self {
             kind: LatencyProfileKind::Low,
             buffer_ms: 100,
+            frames_per_packet: RAOP_FRAMES_PER_PACKET,
         }
     }
 
@@ -156,14 +160,21 @@ impl LatencyProfile {
         Self {
             kind: LatencyProfileKind::Realtime,
             buffer_ms: 50,
+            frames_per_packet: 128,
         }
     }
 
     #[must_use]
     pub const fn custom(buffer_ms: u32) -> Self {
+        Self::custom_with_packet_frames(buffer_ms, RAOP_FRAMES_PER_PACKET)
+    }
+
+    #[must_use]
+    pub const fn custom_with_packet_frames(buffer_ms: u32, frames_per_packet: usize) -> Self {
         Self {
             kind: LatencyProfileKind::Custom,
             buffer_ms,
+            frames_per_packet,
         }
     }
 
@@ -185,13 +196,7 @@ impl LatencyProfile {
 
     #[must_use]
     pub const fn frames_per_packet(self) -> usize {
-        match self.kind {
-            LatencyProfileKind::Realtime => 128,
-            LatencyProfileKind::Safe
-            | LatencyProfileKind::Normal
-            | LatencyProfileKind::Low
-            | LatencyProfileKind::Custom => RAOP_FRAMES_PER_PACKET,
-        }
+        self.frames_per_packet
     }
 }
 
@@ -425,6 +430,10 @@ mod tests {
         assert_eq!(
             LatencyProfile::custom(0).frames_per_packet(),
             RAOP_FRAMES_PER_PACKET
+        );
+        assert_eq!(
+            LatencyProfile::custom_with_packet_frames(25, 64).frames_per_packet(),
+            64
         );
     }
 
