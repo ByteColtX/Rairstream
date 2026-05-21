@@ -13,6 +13,7 @@ pub(crate) const RAOP_CHANNELS: u16 = 2;
 pub(crate) const RAOP_BITS_PER_SAMPLE: u16 = 16;
 pub(crate) const RAOP_FRAMES_PER_PACKET: usize = 352;
 pub(crate) const RAOP_STARTUP_LATENCY_MILLIS: u32 = 250;
+#[cfg(test)]
 pub(crate) const RAOP_STARTUP_LATENCY_FRAMES: u32 =
     RAOP_STARTUP_LATENCY_MILLIS * RAOP_SAMPLE_RATE_HZ / 1_000;
 

@@ -11,7 +11,7 @@ use crate::pairing::ReceiverCredentials;
 use crate::platform;
 use crate::receiver::{Receiver, selector};
 use crate::session::{
-    PlaybackSession, pair_receiver_with_pin, play_capture, play_file,
+    LatencyProfile, PlaybackSession, pair_receiver_with_pin, play_capture, play_file,
     request_pairing_pin_display as session_request_pairing_pin_display,
 };
 use crate::storage::{paired_devices, receiver_cache};
@@ -240,7 +240,12 @@ where
         Ok(entry)
     }
 
-    pub fn play_file(&mut self, path: &Path, selectors: &[String]) -> Result<(), RairstreamError> {
+    pub fn play_file(
+        &mut self,
+        path: &Path,
+        selectors: &[String],
+        latency_profile: LatencyProfile,
+    ) -> Result<(), RairstreamError> {
         let receivers = self.ensure_receivers()?;
         let targets = selector::resolve_receivers(&receivers, selectors)?;
         self.state.session = SessionState::Streaming {
@@ -251,6 +256,7 @@ where
             &targets,
             &self.config.paired_receivers,
             self.config.sender_volume_percent,
+            latency_profile,
         );
         self.state.session = SessionState::Idle;
         result
@@ -259,6 +265,7 @@ where
     pub fn play_capture(
         &mut self,
         selectors: &[String],
+        latency_profile: LatencyProfile,
     ) -> Result<PlaybackSession, RairstreamError> {
         let receivers = self.ensure_receivers()?;
         let targets = selector::resolve_receivers(&receivers, selectors)?;
@@ -269,6 +276,7 @@ where
             &targets,
             &self.config.paired_receivers,
             self.config.sender_volume_percent,
+            latency_profile,
         ) {
             Ok(session) => Ok(session),
             Err(error) => {
@@ -425,6 +433,7 @@ mod tests {
     use crate::receiver::{
         AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
+    use crate::session::LatencyProfile;
 
     use super::{AppFacade, DiscoveryService, SessionState, save_config};
 
@@ -785,7 +794,11 @@ mod tests {
                 .as_nanos()
         ));
 
-        let result = facade.play_file(&missing_file, &[String::from("Living Room")]);
+        let result = facade.play_file(
+            &missing_file,
+            &[String::from("Living Room")],
+            LatencyProfile::safe(),
+        );
 
         assert!(result.is_err());
         assert_eq!(facade.state().session, SessionState::Idle);

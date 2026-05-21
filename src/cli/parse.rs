@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::error::RairstreamError;
+use crate::session::LatencyProfile;
 
 pub(crate) const CLI_USAGE: &str =
     "usage: rairstream [-h|--help] [-v|-vv] [--log-level <error|warn|info|debug|trace>] <command>";
@@ -14,8 +15,8 @@ pub(crate) const CLI_COMMAND_USAGE: &[&str] = &[
     "pair --device <selector> [--pin <PIN>]",
     "paired list",
     "paired forget --device <selector>",
-    "play file <path> --device <selector>...",
-    "play capture --device <selector>...",
+    "play file <path> --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>]",
+    "play capture --device <selector>... [--latency <safe|normal|low|realtime|custom>] [--buffer-ms <ms>]",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,9 +37,11 @@ pub enum CliCommand {
     PlayFile {
         path: PathBuf,
         selectors: Vec<String>,
+        latency_profile: LatencyProfile,
     },
     PlayCapture {
         selectors: Vec<String>,
+        latency_profile: LatencyProfile,
     },
 }
 
@@ -47,6 +50,12 @@ pub struct CliOptions {
     pub command: CliCommand,
     pub log_level: Option<String>,
     pub verbosity: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LatencySelection {
+    Profile(LatencyProfile),
+    Custom,
 }
 
 impl CliOptions {
@@ -169,14 +178,20 @@ fn parse_play_command(args: &[String]) -> Result<CliCommand, RairstreamError> {
             let Some((path, selectors)) = tail.split_first() else {
                 return Err(usage_error());
             };
+            let (selectors, latency_profile) = parse_play_selectors_and_latency(selectors)?;
             Ok(CliCommand::PlayFile {
                 path: PathBuf::from(path),
-                selectors: parse_device_selectors(selectors)?,
+                selectors,
+                latency_profile,
             })
         }
-        "capture" => Ok(CliCommand::PlayCapture {
-            selectors: parse_device_selectors(tail)?,
-        }),
+        "capture" => {
+            let (selectors, latency_profile) = parse_play_selectors_and_latency(tail)?;
+            Ok(CliCommand::PlayCapture {
+                selectors,
+                latency_profile,
+            })
+        }
         _ => Err(usage_error()),
     }
 }
@@ -224,23 +239,56 @@ fn normalize_cli_text(value: &str, label: &str) -> Result<String, RairstreamErro
     Ok(value.to_string())
 }
 
-fn parse_device_selectors(args: &[String]) -> Result<Vec<String>, RairstreamError> {
+fn parse_play_selectors_and_latency(
+    args: &[String],
+) -> Result<(Vec<String>, LatencyProfile), RairstreamError> {
     let mut selectors = Vec::new();
+    let mut latency_selection = None;
+    let mut custom_buffer_ms = None;
     let mut index = 0;
     while index < args.len() {
-        if args[index] != "--device" {
-            return Err(RairstreamError::InvalidCli {
-                message: format!("unexpected argument `{}`", args[index]),
-            });
+        match args[index].as_str() {
+            "--device" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| RairstreamError::InvalidCli {
+                        message: String::from("--device requires a value"),
+                    })?;
+                selectors.push(normalize_cli_text(value, "selector")?);
+                index += 2;
+            }
+            "--latency" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| missing_value_error("--latency"))?;
+                latency_selection = Some(parse_latency_selection(value)?);
+                index += 2;
+            }
+            "--buffer-ms" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| missing_value_error("--buffer-ms"))?;
+                custom_buffer_ms = Some(parse_buffer_ms(value)?);
+                index += 2;
+            }
+            unexpected if unexpected.starts_with("--latency=") => {
+                latency_selection = Some(parse_latency_selection(
+                    unexpected.trim_start_matches("--latency="),
+                )?);
+                index += 1;
+            }
+            unexpected if unexpected.starts_with("--buffer-ms=") => {
+                custom_buffer_ms = Some(parse_buffer_ms(
+                    unexpected.trim_start_matches("--buffer-ms="),
+                )?);
+                index += 1;
+            }
+            unexpected => {
+                return Err(RairstreamError::InvalidCli {
+                    message: format!("unexpected argument `{unexpected}`"),
+                });
+            }
         }
-
-        let value = args
-            .get(index + 1)
-            .ok_or_else(|| RairstreamError::InvalidCli {
-                message: String::from("--device requires a value"),
-            })?;
-        selectors.push(normalize_cli_text(value, "selector")?);
-        index += 2;
     }
 
     if selectors.is_empty() {
@@ -249,7 +297,39 @@ fn parse_device_selectors(args: &[String]) -> Result<Vec<String>, RairstreamErro
         });
     }
 
-    Ok(selectors)
+    let latency_profile = match (latency_selection, custom_buffer_ms) {
+        (Some(LatencySelection::Custom), None) => {
+            return Err(RairstreamError::InvalidCli {
+                message: String::from("--latency custom requires --buffer-ms <ms>"),
+            });
+        }
+        (_, Some(buffer_ms)) => LatencyProfile::custom(buffer_ms),
+        (Some(LatencySelection::Profile(profile)), None) => profile,
+        (None, None) => LatencyProfile::safe(),
+    };
+
+    Ok((selectors, latency_profile))
+}
+
+fn parse_latency_selection(value: &str) -> Result<LatencySelection, RairstreamError> {
+    match value {
+        "safe" => Ok(LatencySelection::Profile(LatencyProfile::safe())),
+        "normal" => Ok(LatencySelection::Profile(LatencyProfile::normal())),
+        "low" => Ok(LatencySelection::Profile(LatencyProfile::low())),
+        "realtime" => Ok(LatencySelection::Profile(LatencyProfile::realtime())),
+        "custom" => Ok(LatencySelection::Custom),
+        _ => Err(RairstreamError::InvalidCli {
+            message: format!("unsupported latency profile `{value}`"),
+        }),
+    }
+}
+
+fn parse_buffer_ms(value: &str) -> Result<u32, RairstreamError> {
+    value
+        .parse::<u32>()
+        .map_err(|_| RairstreamError::InvalidCli {
+            message: format!("--buffer-ms must be a non-negative integer, got `{value}`"),
+        })
 }
 
 fn usage_error() -> RairstreamError {

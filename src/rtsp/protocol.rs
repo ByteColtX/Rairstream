@@ -3,7 +3,7 @@
 use std::fmt::Write;
 use std::net::UdpSocket;
 
-use crate::audio::{CodecDescription, RAOP_STARTUP_LATENCY_FRAMES};
+use crate::audio::CodecDescription;
 use crate::session::{AirPlayError, SessionDescriptor};
 
 /// `RTSP` 请求方法。
@@ -442,7 +442,7 @@ fn build_pcm_sdp(descriptor: &SessionDescriptor, codec: &CodecDescription) -> St
         sender_ip,
         sender_ip,
         codec.rtpmap,
-        RAOP_STARTUP_LATENCY_FRAMES
+        descriptor.latency_profile.buffer_frames()
     )
 }
 
@@ -521,7 +521,7 @@ mod tests {
     use crate::receiver::{
         AirPlayGeneration, AuthMethod, DeviceSupport, Receiver, ReceiverCapabilities, ReceiverKind,
     };
-    use crate::session::{AirPlayError, SessionDescriptor};
+    use crate::session::{AirPlayError, LatencyProfile, SessionDescriptor};
 
     fn build_descriptor() -> SessionDescriptor {
         SessionDescriptor::new(
@@ -710,6 +710,26 @@ mod tests {
             RAOP_STARTUP_LATENCY_FRAMES,
             RAOP_STARTUP_LATENCY_MILLIS * 44_100 / 1_000
         );
+    }
+
+    #[test]
+    fn announce_request_min_latency_uses_descriptor_buffer_profile() {
+        let mut descriptor = build_descriptor();
+        descriptor.latency_profile = LatencyProfile::low();
+        let request = build_announce_request(&descriptor, 8, &CodecDescription::pcm_stereo());
+        let body = request.body_text().unwrap();
+
+        assert!(body.contains("a=min-latency:4410"));
+    }
+
+    #[test]
+    fn announce_request_min_latency_allows_custom_zero_buffer() {
+        let mut descriptor = build_descriptor();
+        descriptor.latency_profile = LatencyProfile::custom(0);
+        let request = build_announce_request(&descriptor, 8, &CodecDescription::pcm_stereo());
+        let body = request.body_text().unwrap();
+
+        assert!(body.contains("a=min-latency:0"));
     }
 
     #[test]

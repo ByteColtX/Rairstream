@@ -289,7 +289,10 @@ where
             ];
         }
 
-        match self.facade.play_capture(&selected_ids) {
+        match self
+            .facade
+            .play_capture(&selected_ids, crate::session::LatencyProfile::safe())
+        {
             Ok(session) => {
                 self.active_session = Some(session);
                 self.reconnect_due = None;
@@ -379,7 +382,10 @@ where
         let attempt = *attempt;
 
         let _ = self.facade.discover();
-        if let Ok(session) = self.facade.play_capture(&receiver_ids) {
+        if let Ok(session) = self
+            .facade
+            .play_capture(&receiver_ids, crate::session::LatencyProfile::safe())
+        {
             self.active_session = Some(session);
             self.reconnect_due = None;
             self.runtime.start_streaming(receiver_ids);

@@ -15,9 +15,11 @@ use std::thread::{self, JoinHandle};
 
 pub use decode::FileChunkDecoder;
 pub use raop::AudioResampler;
-pub(crate) use raop::{CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_STARTUP_LATENCY_FRAMES};
 #[cfg(test)]
-pub(crate) use raop::{RAOP_SAMPLE_RATE_HZ, RAOP_STARTUP_LATENCY_MILLIS};
+pub(crate) use raop::RAOP_STARTUP_LATENCY_FRAMES;
+pub(crate) use raop::{
+    CodecDescription, RAOP_FRAMES_PER_PACKET, RAOP_SAMPLE_RATE_HZ, RAOP_STARTUP_LATENCY_MILLIS,
+};
 
 /// PCM 样本的数据语义。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
