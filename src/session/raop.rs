@@ -529,6 +529,17 @@ mod tests {
     }
 
     #[test]
+    fn connect_preserves_realtime_packet_size_in_sink_config() {
+        let mut descriptor = build_descriptor(AudioFormat::default());
+        descriptor.latency_profile = crate::session::LatencyProfile::realtime();
+        descriptor.frames_per_packet = descriptor.latency_profile.frames_per_packet();
+
+        let session = RaopSession::connect(&descriptor).unwrap();
+
+        assert_eq!(session.sink_config().frames_per_packet, 128);
+    }
+
+    #[test]
     fn connect_rejects_out_of_range_sender_volume_percent() {
         let mut descriptor = build_descriptor(AudioFormat::default());
         descriptor.sender_volume_percent = 401;

@@ -47,6 +47,7 @@ where
         let mut descriptor = SessionDescriptor::new(receiver.clone(), input_format);
         descriptor.sender_volume_percent = sender_volume_percent;
         descriptor.latency_profile = latency_profile;
+        descriptor.frames_per_packet = latency_profile.frames_per_packet();
         if let Some(credentials) = paired_receivers.get(&receiver.id).cloned() {
             descriptor = descriptor.with_receiver_credentials(credentials);
         }

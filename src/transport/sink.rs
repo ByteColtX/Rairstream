@@ -69,7 +69,11 @@ impl RaopAudioSink {
             sync_interval_packets = transport.sink_config.sync_interval_packets,
             "initializing RAOP audio sink"
         );
-        let mut resampler = AudioResampler::new(source_format);
+        let mut resampler = AudioResampler::with_config(
+            source_format,
+            100,
+            transport.sink_config.frames_per_packet,
+        );
         let initial_sender_volume_percent = sender_volume_percent
             .lock()
             .map_or(100, |sender_volume_percent| *sender_volume_percent);
@@ -292,5 +296,50 @@ mod tests {
         assert_eq!(&audio_buffer[8..12], &0x1122_3344_u32.to_be_bytes());
         assert_eq!(control_len, 20);
         assert_eq!(control_buffer[1] & 0x7f, 84);
+    }
+
+    #[test]
+    fn raop_audio_sink_uses_configured_packet_size() {
+        let audio_receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let control_receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        audio_receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        control_receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let transport = RaopStreamTransport {
+            audio_socket: UdpSocket::bind("127.0.0.1:0").unwrap(),
+            control_socket: UdpSocket::bind("127.0.0.1:0").unwrap(),
+            audio_target: audio_receiver.local_addr().unwrap(),
+            control_target: control_receiver.local_addr().unwrap(),
+            audio_ssrc: 0x1122_3344,
+            packet_counters: RaopPacketCounters::new(7, 11),
+            sink_config: RaopSinkConfig {
+                frames_per_packet: 128,
+                sync_interval_packets: 1,
+                sender_volume_percent: 100,
+            },
+        };
+        let format = AudioFormat::default();
+        let mut sink = RaopAudioSink::new(format, transport, Arc::new(Mutex::new(100)));
+        let mut bytes = Vec::new();
+        for _ in 0..128 {
+            bytes.extend_from_slice(&1000_i16.to_le_bytes());
+            bytes.extend_from_slice(&(-1000_i16).to_le_bytes());
+        }
+        let chunk = AudioChunk::new(format, bytes).unwrap();
+
+        sink.write(chunk).unwrap();
+
+        let mut audio_buffer = [0_u8; 1600];
+        let mut control_buffer = [0_u8; 64];
+        let (audio_len, _) = audio_receiver.recv_from(&mut audio_buffer).unwrap();
+        let (control_len, _) = control_receiver.recv_from(&mut control_buffer).unwrap();
+
+        assert_eq!(audio_len, 12 + 128 * 4);
+        assert_eq!(control_len, 20);
+        assert_eq!(&audio_buffer[4..8], &11_u32.to_be_bytes());
+        assert_eq!(&control_buffer[16..20], &(11_u32 + 128).to_be_bytes());
     }
 }
